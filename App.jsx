@@ -2659,6 +2659,11 @@ export default function App() {
     });
   }, [pushHistory]);
 
+  const updateSettings = useCallback(async (patch) => {
+    const current = await loadBlob("appSettings", { lastGoalGenDate: null });
+    await saveBlob("appSettings", { ...current, ...patch });
+  }, []);
+
   const onSaveTelegramChannel = useCallback((subj, channel) => {
     setTelegramChannels(prev => {
       const next = { ...prev, [subj]: channel };
@@ -2675,11 +2680,6 @@ export default function App() {
       return next;
     });
   }, [pushHistory]);
-
-  const updateSettings = useCallback(async (patch) => {
-    const current = await loadBlob("appSettings", { lastGoalGenDate: null });
-    await saveBlob("appSettings", { ...current, ...patch });
-  }, []);
 
   const onChangeTheme = useCallback((mode) => {
     setThemeMode(mode);
