@@ -2172,7 +2172,8 @@ function PlannerRecalcPanel({ backlogSettings, onApply, plannerLock }) {
   const [weekday, setWeekday] = useState(backlogSettings.weekdayQuota);
   const [sunday, setSunday] = useState(backlogSettings.sundayQuota);
   const [preview, setPreview] = useState(null);
-  const [passwordPrompt, setPasswordPrompt] = useState(false);
+  const [confirmStep, setConfirmStep] = useState(false); // used by "Protected" tier
+  const [passwordPrompt, setPasswordPrompt] = useState(false); // used by "Locked" tier
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
@@ -2182,10 +2183,17 @@ function PlannerRecalcPanel({ backlogSettings, onApply, plannerLock }) {
     setPreview(previewBacklogSchedule(start, weekday, sunday));
   };
 
-  const applyChange = async () => {
-    if (plannerLock === "Locked") { setPasswordPrompt(true); return; }
+  const doApply = () => {
     onApply(start, weekday, sunday);
     setPreview(null);
+    setConfirmStep(false);
+    setPasswordPrompt(false);
+  };
+
+  const applyChange = async () => {
+    if (plannerLock === "Locked") { setPasswordPrompt(true); return; }
+    if (plannerLock === "Protected") { setConfirmStep(true); return; }
+    doApply(); // Unlocked — apply immediately
   };
 
   const confirmWithPassword = async () => {
@@ -2194,9 +2202,7 @@ function PlannerRecalcPanel({ backlogSettings, onApply, plannerLock }) {
       const { data: userData } = await supabase.auth.getUser();
       const { error } = await supabase.auth.signInWithPassword({ email: userData.user.email, password });
       if (error) throw error;
-      onApply(start, weekday, sunday);
-      setPreview(null);
-      setPasswordPrompt(false);
+      doApply();
       setPassword("");
     } catch (e) {
       setAuthError("Incorrect password — planner not changed.");
@@ -2249,6 +2255,17 @@ function PlannerRecalcPanel({ backlogSettings, onApply, plannerLock }) {
             <button onClick={() => { setPasswordPrompt(false); setPassword(""); }} style={{ flex: 1, background: "var(--border2)", color: "var(--text-dim)", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
           </div>
         </div>
+      ) : confirmStep ? (
+        <div style={{ background: `${REVISION_GOLD}12`, border: `1px solid ${REVISION_GOLD}55`, borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
+            Planner is Protected — confirm this important change:<br />
+            <b style={{ color: "var(--text-muted)" }}>{fmtDate(backlogSettings.backlogStartDate)}</b> → <b style={{ color: REVISION_GOLD }}>{fmtDate(start)}</b>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={doApply} style={{ flex: 1, background: REVISION_GOLD, color: "#0B1220", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Confirm &amp; Apply</button>
+            <button onClick={() => setConfirmStep(false)} style={{ flex: 1, background: "var(--border2)", color: "var(--text-dim)", border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Cancel</button>
+          </div>
+        </div>
       ) : (
         <button onClick={applyChange} style={{
           width: "100%", background: "#22C55E", color: "#0B1220", border: "none", borderRadius: 8,
@@ -2259,7 +2276,31 @@ function PlannerRecalcPanel({ backlogSettings, onApply, plannerLock }) {
   );
 }
 
-function SettingsPage({ themeMode, onChangeTheme, dailyTargetHours, onChangeTarget, examDate, onChangeExamDate, onExportData, userEmail, onLogout, backlogSettings, onApplyBacklogSettings, plannerLock, onChangePlannerLock }) {
+function VersionHistoryPanel({ versions }) {
+  const [open, setOpen] = useState(false);
+  if (versions.length === 0) return null;
+  return (
+    <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 14, marginBottom: 16 }}>
+      <button onClick={() => setOpen(!open)} style={{ width: "100%", background: "none", border: "none", padding: 0, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+        <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 700 }}>📜 Planner Version History ({versions.length})</span>
+        {open ? <ChevronDown size={16} color="var(--text-muted)" /> : <ChevronRight size={16} color="var(--text-muted)" />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {[...versions].reverse().map(v => (
+            <div key={v.version} style={{ background: NAVY_CARD2, borderRadius: 10, padding: 10, marginBottom: 6, fontSize: 11 }}>
+              <div style={{ color: REVISION_GOLD, fontWeight: 700, marginBottom: 3 }}>Planner v{v.version} — {new Date(v.date).toLocaleString("en-IN")}</div>
+              <div style={{ color: "var(--text-dim)" }}>Start: {fmtDate(v.previous.backlogStartDate)} → {fmtDate(v.next.backlogStartDate)}</div>
+              <div style={{ color: "var(--text-dim)" }}>Quota: {v.previous.weekdayQuota}/{v.previous.sundayQuota} → {v.next.weekdayQuota}/{v.next.sundayQuota}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettingsPage({ themeMode, onChangeTheme, dailyTargetHours, onChangeTarget, examDate, onChangeExamDate, onExportData, userEmail, onLogout, backlogSettings, onApplyBacklogSettings, plannerLock, onChangePlannerLock, plannerVersions }) {
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>APPEARANCE</div>
@@ -2292,19 +2333,22 @@ function SettingsPage({ themeMode, onChangeTheme, dailyTargetHours, onChangeTarg
 
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>PLANNER</div>
       <PlannerRecalcPanel backlogSettings={backlogSettings} onApply={onApplyBacklogSettings} plannerLock={plannerLock} />
+      <VersionHistoryPanel versions={plannerVersions} />
 
       <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 14, marginBottom: 16 }}>
         <div style={{ fontSize: 12.5, color: "var(--text)", marginBottom: 8 }}>🔒 Planner Lock</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {["Unlocked", "Locked"].map(mode => (
+        <div style={{ display: "flex", gap: 6 }}>
+          {["Unlocked", "Protected", "Locked"].map(mode => (
             <button key={mode} onClick={() => onChangePlannerLock(mode)} style={{
               flex: 1, padding: "9px 0", borderRadius: 8, border: plannerLock === mode ? "2px solid #3B82F6" : "1px solid var(--border)",
-              background: "var(--input-bg)", color: "var(--text-dim)", fontSize: 12, fontWeight: 700, cursor: "pointer"
-            }}>{mode === "Locked" ? "🔒 Locked" : "🔓 Unlocked"}</button>
+              background: "var(--input-bg)", color: "var(--text-dim)", fontSize: 11, fontWeight: 700, cursor: "pointer"
+            }}>{mode === "Locked" ? "🔒 Locked" : mode === "Protected" ? "🛡️ Protected" : "🔓 Unlocked"}</button>
           ))}
         </div>
         <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 8 }}>
-          {plannerLock === "Locked" ? "Changing backlog start date or quota requires your password." : "Planner settings can be changed freely."}
+          {plannerLock === "Locked" ? "Changing backlog start date or quota requires your password."
+            : plannerLock === "Protected" ? "Important changes show a confirmation with current vs. new values first."
+            : "Planner settings can be changed freely."}
         </div>
       </div>
 
@@ -2957,6 +3001,7 @@ export default function App() {
   const [assignments, setAssignments] = useState([]);
   const [backlogSettings, setBacklogSettings] = useState({ backlogStartDate: "2026-08-20", weekdayQuota: 2, sundayQuota: 3 });
   const [plannerLock, setPlannerLock] = useState("Unlocked");
+  const [plannerVersions, setPlannerVersions] = useState([]);
   const [scheduleVersion, setScheduleVersion] = useState(0); // bump to force re-render after recomputeBacklogSchedule
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -2985,7 +3030,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -3001,6 +3046,7 @@ export default function App() {
         loadBlob("backlogTrend", {}),
         loadBlob("completedHistory", []),
         loadBlob("assignments", []),
+        loadBlob("plannerVersions", []),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -3078,6 +3124,7 @@ export default function App() {
       setSpacedStates(spaced);
       setCompletedHistory(compHist);
       setAssignments(assigns);
+      setPlannerVersions(versions);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -3248,12 +3295,20 @@ export default function App() {
   }, []);
 
   const onApplyBacklogSettings = useCallback((startDate, weekdayQuota, sundayQuota) => {
-    recomputeBacklogSchedule(startDate, weekdayQuota, sundayQuota);
-    const next = { backlogStartDate: startDate, weekdayQuota, sundayQuota };
-    setBacklogSettings(next);
-    setScheduleVersion(v => v + 1); // force all consumers to re-render with new schedule
-    updateSettings(next);
-    pushHistory(`⚙️ Planner recalculated — start ${fmtDate(startDate)}, ${weekdayQuota}/day weekday, ${sundayQuota}/day Sunday`);
+    setBacklogSettings(prevSettings => {
+      recomputeBacklogSchedule(startDate, weekdayQuota, sundayQuota);
+      const next = { backlogStartDate: startDate, weekdayQuota, sundayQuota };
+      setPlannerVersions(prevVersions => {
+        const versionRecord = { version: prevVersions.length + 1, date: new Date().toISOString(), previous: prevSettings, next };
+        const nextVersions = [...prevVersions, versionRecord];
+        saveBlob("plannerVersions", nextVersions);
+        return nextVersions;
+      });
+      setScheduleVersion(v => v + 1); // force all consumers to re-render with new schedule
+      updateSettings(next);
+      pushHistory(`⚙️ Planner recalculated — start ${fmtDate(startDate)}, ${weekdayQuota}/day weekday, ${sundayQuota}/day Sunday`);
+      return next;
+    });
   }, [pushHistory, updateSettings]);
 
   const onChangePlannerLock = useCallback((mode) => {
@@ -3466,7 +3521,7 @@ export default function App() {
         {tab === "more" && moreTab === "completedHistory" && (<><SubPageHeader title="Completed History" onBack={() => setMoreTab(null)} /><CompletedHistoryPage completedHistory={completedHistory} /></>)}
         {tab === "more" && moreTab === "integrity" && (<><SubPageHeader title="Data Integrity Check" onBack={() => setMoreTab(null)} /><IntegrityCheckPage taskStates={taskStates} missedRecords={missedRecords} /></>)}
         {tab === "more" && moreTab === "import" && (<><SubPageHeader title="Import Planner" onBack={() => setMoreTab(null)} /><PlannerImportPage importedPlanner={importedPlanner} onImport={onImportPlanner} /></>)}
-        {tab === "more" && moreTab === "settings" && (<><SubPageHeader title="Settings" onBack={() => setMoreTab(null)} /><SettingsPage themeMode={themeMode} onChangeTheme={onChangeTheme} dailyTargetHours={dailyTargetHours} onChangeTarget={onChangeTarget} examDate={examDate} onChangeExamDate={onChangeExamDate} onExportData={onExportData} userEmail={userEmail} onLogout={onLogout} backlogSettings={backlogSettings} onApplyBacklogSettings={onApplyBacklogSettings} plannerLock={plannerLock} onChangePlannerLock={onChangePlannerLock} /></>)}
+        {tab === "more" && moreTab === "settings" && (<><SubPageHeader title="Settings" onBack={() => setMoreTab(null)} /><SettingsPage themeMode={themeMode} onChangeTheme={onChangeTheme} dailyTargetHours={dailyTargetHours} onChangeTarget={onChangeTarget} examDate={examDate} onChangeExamDate={onChangeExamDate} onExportData={onExportData} userEmail={userEmail} onLogout={onLogout} backlogSettings={backlogSettings} onApplyBacklogSettings={onApplyBacklogSettings} plannerLock={plannerLock} onChangePlannerLock={onChangePlannerLock} plannerVersions={plannerVersions} /></>)}
         {tab === "more" && moreTab === "telegram" && (<><SubPageHeader title="Telegram Sync" onBack={() => setMoreTab(null)} /><TelegramSyncPage taskStates={taskStates} onLinkTelegram={onLinkTelegram} telegramChannels={telegramChannels} onSaveChannel={onSaveTelegramChannel} /></>)}
       </div>
 
