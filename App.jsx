@@ -543,13 +543,17 @@ function SpacedRepetitionSection({ dueList, spacedStates, onSpacedToggle }) {
   );
 }
 
-function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords, studyHours, setSubjectHours, today, target, examDate, ncertStates, revisionStates, pyqStates, spacedStates, onSpacedToggle, isBufferDay }) {
+function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords, studyHours, setSubjectHours, today, target, examDate, ncertStates, revisionStates, pyqStates, spacedStates, onSpacedToggle, isBufferDay, assignments, onCompleteAssignment }) {
   const liveToday = RAW_LIVE.filter(t => t.d === today);
   const { overdueBacklog, openMissed } = deriveCarryForward(today, taskStates, missedRecords);
   const nextQueue = nextBacklogQueue(taskStates, 6, today);
   const catchUpPlan = adaptiveCatchUpPlan(nextQueue.tasks.length > 0 ? effectiveBacklogForSubject(nextQueue.subject, today, t => computeIsDone(taskStates[t.id])).filter(t => !computeIsDone(taskStates[t.id])).length : 0);
   const { streak, todayCounted } = computeStreak(today, taskStates, ncertStates, revisionStates, pyqStates);
   const spacedDue = computeSpacedDue(taskStates, spacedStates, today);
+  const assignmentsDue = (assignments || []).filter(a => {
+    const st = computeAssignmentStatus(a, today);
+    return (st === "Overdue" || a.dueDate === today) && st !== "Completed" && st !== "Skipped";
+  });
 
   const hToday = studyHours[today] || {};
   const totalToday = Object.values(hToday).reduce((a, b) => a + (b || 0), 0);
@@ -592,6 +596,30 @@ function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords,
       </div>
 
       <SpacedRepetitionSection dueList={spacedDue} spacedStates={spacedStates} onSpacedToggle={onSpacedToggle} />
+
+      {assignmentsDue.length > 0 && (
+        <>
+          <SectionHeader icon="📚" title="ASSIGNMENTS DUE" count={assignmentsDue.length} color="#3B82F6" />
+          {assignmentsDue.map(a => {
+            const style = SUBJECT_STYLE[a.subject] || {};
+            const overdue = a.dueDate < today;
+            return (
+              <div key={a.id} style={{ background: NAVY_CARD2, borderRadius: 12, padding: 12, marginBottom: 8, borderLeft: `4px solid ${overdue ? URGENT_RED : style.accent}` }}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                  <Pill text={`${style.emoji || ""} ${a.subject}`} color={style.accent || "#64748B"} />
+                  {overdue && <Pill text="OVERDUE" color={URGENT_RED} />}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{a.title}</div>
+                <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 4 }}>Due {fmtDate(a.dueDate)}</div>
+                <button onClick={() => onCompleteAssignment(a.id)} disabled={!!a.requireProof && !(a.proofImages || []).length} style={{
+                  marginTop: 8, background: "#22C55E", color: "#0B1220", border: "none", borderRadius: 8, padding: "7px 14px",
+                  fontSize: 11.5, fontWeight: 700, cursor: "pointer", opacity: (!!a.requireProof && !(a.proofImages || []).length) ? 0.4 : 1
+                }}>✓ Mark Complete</button>
+              </div>
+            );
+          })}
+        </>
+      )}
 
       {(overdueBacklog.length > 0 || openMissed.length > 0) && (
         <>
@@ -2441,6 +2469,163 @@ function TelegramSyncPage({ taskStates, onLinkTelegram, telegramChannels, onSave
   );
 }
 
+/* ============================================================
+   MODULE — ASSIGNMENTS (Phase 3)
+   A separate entity from planner lectures — homework, self-set
+   targets, anything with its own due date. Supports the same
+   proof-of-completion pattern as lecture tasks.
+   ============================================================ */
+function computeAssignmentStatus(a, today) {
+  if (a.status === "Completed") return "Completed";
+  if (a.status === "Skipped") return "Skipped";
+  if (a.dueDate && a.dueDate < today) return "Overdue";
+  return a.status || "Not Started";
+}
+
+function AssignmentForm({ onSave, onCancel }) {
+  const [f, setF] = useState({
+    title: "", subject: "Physics", chapter: "", description: "",
+    assignedDate: todayISO(), dueDate: todayISO(), priority: "Medium", durationMinutes: 60,
+  });
+  const upd = (k, v) => setF(prev => ({ ...prev, [k]: v }));
+  return (
+    <div style={{ background: NAVY_CARD2, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+      <input placeholder="Assignment title" value={f.title} onChange={e => upd("title", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <select value={f.subject} onChange={e => upd("subject", e.target.value)} style={inputStyle}>
+          {SUBJECT_ORDER.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={f.priority} onChange={e => upd("priority", e.target.value)} style={inputStyle}>
+          <option>High</option><option>Medium</option><option>Low</option>
+        </select>
+      </div>
+      <input placeholder="Chapter (optional)" value={f.chapter} onChange={e => upd("chapter", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+      <textarea placeholder="Description / questions" value={f.description} onChange={e => upd("description", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8, minHeight: 50 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <div>
+          <label style={{ fontSize: 10.5, color: "var(--text-muted)" }}>Assigned date</label>
+          <input type="date" value={f.assignedDate} onChange={e => upd("assignedDate", e.target.value)} style={{ ...inputStyle, width: "100%" }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 10.5, color: "var(--text-muted)" }}>Due date</label>
+          <input type="date" value={f.dueDate} onChange={e => upd("dueDate", e.target.value)} style={{ ...inputStyle, width: "100%" }} />
+        </div>
+      </div>
+      <label style={{ fontSize: 10.5, color: "var(--text-muted)" }}>Estimated duration (minutes)</label>
+      <input type="number" value={f.durationMinutes} onChange={e => upd("durationMinutes", parseInt(e.target.value) || 0)} style={{ ...inputStyle, width: "100%", marginBottom: 10 }} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => onSave(f)} disabled={!f.title.trim()} style={{ flex: 1, background: f.title.trim() ? "#3B82F6" : "var(--border)", color: "#fff", border: "none", borderRadius: 8, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: f.title.trim() ? "pointer" : "default" }}>Save</button>
+        <button onClick={onCancel} style={{ flex: 1, background: "var(--border2)", color: "var(--text-dim)", border: "none", borderRadius: 8, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function AssignmentCard({ a, today, onComplete, onSkip, onAddProof, onRemoveProof, onToggleRequireProof }) {
+  const status = computeAssignmentStatus(a, today);
+  const style = SUBJECT_STYLE[a.subject] || {};
+  const priorityColor = a.priority === "High" ? URGENT_RED : a.priority === "Low" ? "#22C55E" : REVISION_GOLD;
+  const statusColor = status === "Completed" ? "#22C55E" : status === "Overdue" ? URGENT_RED : status === "Skipped" ? "var(--text-muted)" : "#3B82F6";
+  const proofBlocking = !!a.requireProof && !(a.proofImages && a.proofImages.length > 0) && status !== "Completed";
+  const [showProof, setShowProof] = useState(false);
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onAddProof(a.id, reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div style={{ background: NAVY_CARD, borderRadius: 12, padding: 12, marginBottom: 8, borderLeft: `4px solid ${style.accent || "#64748B"}`, opacity: status === "Completed" || status === "Skipped" ? 0.6 : 1 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+        <Pill text={`${style.emoji || ""} ${a.subject}`} color={style.accent || "#64748B"} />
+        <Pill text={a.priority} color={priorityColor} />
+        <Pill text={status} color={statusColor} />
+      </div>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>{a.title}</div>
+      {a.chapter && <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 1 }}>{a.chapter}</div>}
+      {a.description && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 4 }}>{a.description}</div>}
+      <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 6 }}>
+        Assigned {fmtDate(a.assignedDate)} · Due {fmtDate(a.dueDate)} · ~{a.durationMinutes}min
+      </div>
+
+      {showProof && (
+        <div style={{ marginTop: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={!!a.requireProof} onChange={e => onToggleRequireProof(a.id, e.target.checked)} />
+            <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Require proof photo</span>
+          </label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+            {(a.proofImages || []).map((img, idx) => (
+              <div key={idx} style={{ position: "relative", width: 56, height: 56 }}>
+                <img src={img} alt="proof" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                <button onClick={() => onRemoveProof(a.id, idx)} style={{ position: "absolute", top: -5, right: -5, width: 16, height: 16, borderRadius: 8, background: URGENT_RED, color: "#fff", border: "none", fontSize: 9, cursor: "pointer" }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <label style={{ display: "inline-block", fontSize: 10.5, color: "var(--text-dim)", background: NAVY_CARD2, border: "1px dashed var(--border)", borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>
+            📷 Add proof photo
+            <input type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+          </label>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        {status !== "Completed" && status !== "Skipped" && (
+          <>
+            <button onClick={() => proofBlocking ? setShowProof(true) : onComplete(a.id)} style={{
+              flex: 1, background: proofBlocking ? "var(--border)" : "#22C55E", color: proofBlocking ? "var(--text-muted)" : "#0B1220",
+              border: "none", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer"
+            }}>{proofBlocking ? "🔒 Attach proof first" : "✓ Mark Complete"}</button>
+            <button onClick={() => setShowProof(!showProof)} style={{ background: "none", border: "1px solid var(--border)", color: "var(--text-dim)", borderRadius: 8, padding: "8px 10px", fontSize: 11, cursor: "pointer" }}>📷</button>
+            <button onClick={() => onSkip(a.id)} style={{ background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", borderRadius: 8, padding: "8px 10px", fontSize: 11, cursor: "pointer" }}>Skip</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AssignmentsPage({ assignments, today, onAdd, onComplete, onSkip, onAddProof, onRemoveProof, onToggleRequireProof }) {
+  const [showForm, setShowForm] = useState(false);
+  const [filter, setFilter] = useState("Active");
+
+  const withStatus = assignments.map(a => ({ ...a, computedStatus: computeAssignmentStatus(a, today) }));
+  const filtered = filter === "All" ? withStatus
+    : filter === "Active" ? withStatus.filter(a => a.computedStatus !== "Completed" && a.computedStatus !== "Skipped")
+    : withStatus.filter(a => a.computedStatus === filter);
+
+  const overdueCount = withStatus.filter(a => a.computedStatus === "Overdue").length;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{assignments.length} total · {overdueCount} overdue</div>
+        <button onClick={() => setShowForm(!showForm)} style={{ background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+          <Plus size={14} /> Add Assignment
+        </button>
+      </div>
+      {showForm && <AssignmentForm onSave={(f) => { onAdd(f); setShowForm(false); }} onCancel={() => setShowForm(false)} />}
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {["Active", "All", "Overdue", "Completed", "Skipped"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: "6px 10px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: filter === f ? "#3B82F6" : NAVY_CARD, color: filter === f ? "#fff" : "var(--text-dim)", fontSize: 11, fontWeight: 700
+          }}>{f}</button>
+        ))}
+      </div>
+
+      {filtered.length === 0 && <EmptyNote text="No assignments here." />}
+      {filtered.sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || "")).map(a => (
+        <AssignmentCard key={a.id} a={a} today={today} onComplete={onComplete} onSkip={onSkip} onAddProof={onAddProof} onRemoveProof={onRemoveProof} onToggleRequireProof={onToggleRequireProof} />
+      ))}
+    </div>
+  );
+}
+
 function DashboardPage({ taskStates, studyHours, missedRecords, today, examDate, ncertStates, revisionStates, pyqStates }) {
   const isDone = (t) => computeIsDone(taskStates[t.id]);
   const combinedBySubject = {};
@@ -2563,6 +2748,7 @@ const MORE_ITEMS = [
   { key: "chemistryRef", label: "Chemistry Planner", icon: FlaskConical, color: "#14B8A6" },
   { key: "biologyRef", label: "Biology Planner", icon: Dna, color: "#22C55E" },
   { key: "search", label: "Search & Filter", icon: Search, color: "#3B82F6" },
+  { key: "assignments", label: "Assignments", icon: FileText, color: "#3B82F6" },
   { key: "dpp", label: "DPP Tracker", icon: FileText, color: "#F97316" },
   { key: "ncert", label: "NCERT 8x", icon: BookOpen, color: "#22C55E" },
   { key: "revision", label: "Revision 5x", icon: RefreshCw, color: REVISION_GOLD },
@@ -2627,6 +2813,7 @@ export default function App() {
   const [importedPlanner, setImportedPlanner] = useState([]);
   const [spacedStates, setSpacedStates] = useState({});
   const [completedHistory, setCompletedHistory] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [themeMode, setThemeMode] = useState("dark");
@@ -2654,7 +2841,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -2669,6 +2856,7 @@ export default function App() {
         loadBlob("spacedStates", {}),
         loadBlob("backlogTrend", {}),
         loadBlob("completedHistory", []),
+        loadBlob("assignments", []),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -2736,6 +2924,7 @@ export default function App() {
       setImportedPlanner(impPlan);
       setSpacedStates(spaced);
       setCompletedHistory(compHist);
+      setAssignments(assigns);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -2844,6 +3033,58 @@ export default function App() {
       const cur = prev[taskId] || {};
       const next = { ...prev, [taskId]: { ...cur, status: "In Progress", skipReason: "" } };
       saveBlob("taskStates", next);
+      return next;
+    });
+  }, []);
+
+  const onAddAssignment = useCallback((f) => {
+    setAssignments(prev => {
+      const rec = { ...f, id: `ASG-${Date.now()}`, status: "Not Started", proofImages: [], requireProof: false, createdAt: new Date().toISOString() };
+      const next = [...prev, rec];
+      saveBlob("assignments", next);
+      pushHistory(`📚 Assignment added — ${f.title}`);
+      return next;
+    });
+  }, [pushHistory]);
+
+  const onCompleteAssignment = useCallback((id) => {
+    setAssignments(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, status: "Completed", completedAt: new Date().toISOString() } : a);
+      saveBlob("assignments", next);
+      const a = next.find(x => x.id === id);
+      if (a) pushHistory(`✅ Assignment completed — ${a.title}`);
+      return next;
+    });
+  }, [pushHistory]);
+
+  const onSkipAssignment = useCallback((id) => {
+    setAssignments(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, status: "Skipped" } : a);
+      saveBlob("assignments", next);
+      return next;
+    });
+  }, []);
+
+  const onAddAssignmentProof = useCallback((id, imageDataUrl) => {
+    setAssignments(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, proofImages: [...(a.proofImages || []), imageDataUrl] } : a);
+      saveBlob("assignments", next);
+      return next;
+    });
+  }, []);
+
+  const onRemoveAssignmentProof = useCallback((id, index) => {
+    setAssignments(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, proofImages: (a.proofImages || []).filter((_, i) => i !== index) } : a);
+      saveBlob("assignments", next);
+      return next;
+    });
+  }, []);
+
+  const onToggleAssignmentRequireProof = useCallback((id, required) => {
+    setAssignments(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, requireProof: required } : a);
+      saveBlob("assignments", next);
       return next;
     });
   }, []);
@@ -3036,7 +3277,7 @@ export default function App() {
 
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "12px 16px" }}>
         {tab === "home" && <DashboardPage taskStates={taskStates} studyHours={studyHours} missedRecords={missedRecords} today={today} examDate={examDate} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} />}
-        {tab === "today" && <TodayPage taskStates={taskStates} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} missedRecords={missedRecords} studyHours={studyHours} setSubjectHours={setSubjectHours} today={today} target={dailyTargetHours} examDate={examDate} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} spacedStates={spacedStates} onSpacedToggle={onSpacedToggle} isBufferDay={isBufferDay} />}
+        {tab === "today" && <TodayPage taskStates={taskStates} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} missedRecords={missedRecords} studyHours={studyHours} setSubjectHours={setSubjectHours} today={today} target={dailyTargetHours} examDate={examDate} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} spacedStates={spacedStates} onSpacedToggle={onSpacedToggle} isBufferDay={isBufferDay} assignments={assignments} onCompleteAssignment={onCompleteAssignment} />}
         {tab === "backlog" && <BacklogPage taskStates={taskStates} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} today={today} />}
 
         {tab === "more" && moreTab === null && <MoreMenu onOpen={setMoreTab} />}
@@ -3044,6 +3285,7 @@ export default function App() {
         {tab === "more" && moreTab === "chemistryRef" && (<><SubPageHeader title="Chemistry Planner (Original)" onBack={() => setMoreTab(null)} /><PlannerReferencePage group="Chemistry" /></>)}
         {tab === "more" && moreTab === "biologyRef" && (<><SubPageHeader title="Biology Planner (Original)" onBack={() => setMoreTab(null)} /><PlannerReferencePage group="Biology" /></>)}
         {tab === "more" && moreTab === "search" && (<><SubPageHeader title="Search & Filter" onBack={() => setMoreTab(null)} /><SearchPage taskStates={taskStates} missedRecords={missedRecords} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} today={today} /></>)}
+        {tab === "more" && moreTab === "assignments" && (<><SubPageHeader title="Assignments" onBack={() => setMoreTab(null)} /><AssignmentsPage assignments={assignments} today={today} onAdd={onAddAssignment} onComplete={onCompleteAssignment} onSkip={onSkipAssignment} onAddProof={onAddAssignmentProof} onRemoveProof={onRemoveAssignmentProof} onToggleRequireProof={onToggleAssignmentRequireProof} /></>)}
         {tab === "more" && moreTab === "dpp" && (<><SubPageHeader title="DPP Tracker" onBack={() => setMoreTab(null)} /><DppPage taskStates={taskStates} onToggle={onToggle} /></>)}
         {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} /></>)}
         {tab === "more" && moreTab === "revision" && (<><SubPageHeader title="Revision 5x Tracker" onBack={() => setMoreTab(null)} /><RevisionPage revisionStates={revisionStates} onToggle={onRevisionToggle} today={today} /></>)}
