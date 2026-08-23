@@ -211,13 +211,15 @@ function TaskCard({ task, state, onToggle, onHours, badge, badgeColor, showTimin
   const style = SUBJECT_STYLE[task.s];
   const st = state || {};
   const allDone = st.video && st.dpp && st.notes;
+  const isSkipped = st.status === "Skipped";
+  const proofBlocking = !!st.requireProof && !(st.proofImages && st.proofImages.length > 0) && !allDone;
   const isBacklog = !!task.scheduledDate;
-  const effBadge = task.rolledOver ? "MISSED LIVE → BACKLOG" : badge;
-  const effBadgeColor = task.rolledOver ? URGENT_RED : badgeColor;
+  const effBadge = isSkipped ? "SKIPPED" : task.rolledOver ? "MISSED LIVE → BACKLOG" : badge;
+  const effBadgeColor = isSkipped ? "var(--text-muted)" : task.rolledOver ? URGENT_RED : badgeColor;
   return (
     <div style={{
       background: NAVY_CARD2, borderRadius: 14, padding: "12px 14px", marginBottom: 10,
-      borderLeft: `4px solid ${task.rolledOver ? URGENT_RED : style.accent}`, opacity: allDone ? 0.55 : 1,
+      borderLeft: `4px solid ${task.rolledOver ? URGENT_RED : style.accent}`, opacity: (allDone || isSkipped) ? 0.55 : 1,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3, flexWrap: "wrap" }}>
         <Pill text={`${style.emoji} ${style.label}`} color={style.accent} />
@@ -238,10 +240,11 @@ function TaskCard({ task, state, onToggle, onHours, badge, badgeColor, showTimin
         <span>📋 Planner date: <b style={{ color: "var(--text-dim)" }}>{fmtDate(task.d)}</b></span>
         {isBacklog && <span>📅 Scheduled: <b style={{ color: REVISION_GOLD }}>{fmtDate(task.scheduledDate)}</b></span>}
         {st.carryForwardCount > 0 && <span style={{ color: URGENT_RED }}>↪️ Carried forward ×{st.carryForwardCount}</span>}
+        {proofBlocking && <span style={{ color: REVISION_GOLD }}>🔒 proof required — open Details</span>}
       </div>
       <div style={{ display: "flex", gap: 16, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
         {["video", "dpp", "notes"].map(k => (
-          <button key={k} onClick={() => onToggle(task, k)} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+          <button key={k} onClick={() => onToggle(task, k)} disabled={k === "video" && proofBlocking} style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", padding: 0, cursor: (k === "video" && proofBlocking) ? "not-allowed" : "pointer", opacity: (k === "video" && proofBlocking) ? 0.4 : 1 }}>
             <TickBox checked={!!st[k]} size={19} color={style.accent} />
             <span style={{ fontSize: 11, color: st[k] ? "var(--text)" : "var(--text-muted)" }}>{k === "video" ? "Video" : k === "dpp" ? "DPP" : "Notes"}</span>
           </button>
@@ -815,6 +818,34 @@ function HistoryPage({ history }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function CompletedHistoryPage({ completedHistory }) {
+  const sorted = [...completedHistory].sort((a, b) => (b.completionTime || "").localeCompare(a.completionTime || ""));
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 4 }}>
+        Permanent record of every completed lecture — one entry per task, never duplicated even if you re-open and re-tick it.
+      </div>
+      <div style={{ fontSize: 11.5, color: REVISION_GOLD, marginBottom: 12 }}>{completedHistory.length} lectures completed all-time</div>
+      {sorted.length === 0 && <EmptyNote text="Nothing completed yet." />}
+      {sorted.map(r => {
+        const style = SUBJECT_STYLE[r.subject] || {};
+        return (
+          <div key={r.taskId} style={{ background: NAVY_CARD, borderRadius: 10, padding: 10, marginBottom: 6, borderLeft: `3px solid ${style.accent || "#64748B"}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+              <Pill text={`${style.emoji || ""} ${r.subject}`} color={style.accent || "#64748B"} />
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{r.completionTime ? new Date(r.completionTime).toLocaleString("en-IN") : ""}</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 500 }}>{r.chapter} — {r.title}</div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 2 }}>
+              {r.durationMinutes ? `${(r.durationMinutes / 60).toFixed(1)}h logged` : "no time logged"}{r.proofRef ? ` · ${r.proofRef}` : ""}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1605,13 +1636,64 @@ function IntegrityCheckPage({ taskStates, missedRecords }) {
 /* ============================================================
    TASK DETAIL MODAL — full record + journey trail
    ============================================================ */
-function TaskDetailModal({ task, taskStates, missedRecords, onClose }) {
+function ProofImageManager({ task, st, onAddProof, onRemoveProof }) {
+  const [uploading, setUploading] = useState(false);
+  const images = st.proofImages || [];
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      onAddProof(task.id, reader.result);
+      setUploading(false);
+    };
+    reader.onerror = () => setUploading(false);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        {images.map((img, idx) => (
+          <div key={idx} style={{ position: "relative", width: 72, height: 72 }}>
+            <img src={img} alt={`proof ${idx + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }} />
+            <button onClick={() => onRemoveProof(task.id, idx)} style={{
+              position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: 10, background: URGENT_RED,
+              color: "#fff", border: "none", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+            }}>✕</button>
+          </div>
+        ))}
+      </div>
+      <label style={{
+        display: "inline-flex", alignItems: "center", gap: 6, background: NAVY_CARD, border: "1px dashed var(--border)",
+        borderRadius: 8, padding: "8px 12px", fontSize: 11.5, color: "var(--text-dim)", cursor: "pointer"
+      }}>
+        📷 {uploading ? "Uploading…" : images.length ? "Add another photo" : "Attach proof photo"}
+        <input type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} disabled={uploading} />
+      </label>
+    </div>
+  );
+}
+
+function TaskDetailModal({ task, taskStates, missedRecords, onClose, onAddProof, onRemoveProof, onSetRequireProof, onSetTaskNote, onSkipTask, onUnskipTask }) {
+  const [noteDraft, setNoteDraft] = useState("");
+  useEffect(() => {
+    if (task) setNoteDraft(taskStates[task.id]?.taskNote || "");
+  }, [task?.id]); // eslint-disable-line
+
   if (!task) return null;
   const st = taskStates[task.id] || {};
   const style = SUBJECT_STYLE[task.s];
   const isBacklog = !!task.scheduledDate;
   const missedRec = missedRecords.find(m => m.originalTaskId === task.id);
   const isDone = computeIsDone(st);
+  const isSkipped = st.status === "Skipped";
+  const proofCount = (st.proofImages || []).length;
+  const proofBlocking = !!st.requireProof && proofCount === 0 && !isDone;
+
+  const displayStatus = isSkipped ? "Skipped" : proofBlocking ? "Waiting for Proof" : (st.status || "Not Started");
 
   const steps = [
     { label: "Original", done: true, note: `Planner date ${fmtDate(task.d)} · ${task.tc}` },
@@ -1619,7 +1701,8 @@ function TaskDetailModal({ task, taskStates, missedRecords, onClose }) {
   if (missedRec) steps.push({ label: "Missed", done: true, note: `Missed on ${fmtDate(missedRec.missedDate)}` });
   if (st.carryForwardCount > 0) steps.push({ label: "Carry Forward", done: true, note: `Carried forward ×${st.carryForwardCount}` });
   if (isBacklog || missedRec) steps.push({ label: "Rescheduled", done: true, note: isBacklog ? `Scheduled ${fmtDate(task.scheduledDate)}` : `New date ${fmtDate(missedRec?.newScheduledDate || "")}` });
-  steps.push({ label: "Completed", done: isDone, note: st.completedAt ? new Date(st.completedAt).toLocaleString("en-IN") : "Not yet" });
+  if (isSkipped) steps.push({ label: "Skipped", done: true, note: st.skipReason || "No reason given" });
+  else steps.push({ label: "Completed", done: isDone, note: st.completedAt ? new Date(st.completedAt).toLocaleString("en-IN") : "Not yet" });
 
   const rows = [
     ["Task ID", task.id],
@@ -1631,7 +1714,7 @@ function TaskDetailModal({ task, taskStates, missedRecords, onClose }) {
     ["Original Date", fmtDate(task.d)],
     ["Scheduled Date", isBacklog ? fmtDate(task.scheduledDate) : "—"],
     ["Duration", `${LECTURE_MIN} min`],
-    ["Status", st.status || "Not Started"],
+    ["Status", displayStatus],
     ["Priority", task.priority || "Medium"],
     ["Actual Study Time", st.actualHours ? `${st.actualHours}h` : "—"],
     ["Carry Forward Count", st.carryForwardCount || 0],
@@ -1671,7 +1754,7 @@ function TaskDetailModal({ task, taskStates, missedRecords, onClose }) {
         </div>
 
         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>FULL RECORD</div>
-        <div style={{ background: NAVY_CARD, borderRadius: 12, padding: 4, marginBottom: 10 }}>
+        <div style={{ background: NAVY_CARD, borderRadius: 12, padding: 4, marginBottom: 16 }}>
           {rows.map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 10px", borderBottom: "1px solid var(--border2)", fontSize: 12 }}>
               <span style={{ color: "var(--text-muted)" }}>{k}</span>
@@ -1680,14 +1763,46 @@ function TaskDetailModal({ task, taskStates, missedRecords, onClose }) {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 16 }}>
-          {["video", "dpp", "notes"].map(k => (
-            <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <TickBox checked={!!st[k]} size={17} color={style.accent} />
-              <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{k === "video" ? "Video" : k === "dpp" ? "DPP" : "Notes"}</span>
-            </div>
-          ))}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>NOTES</div>
+        <textarea value={noteDraft} onChange={e => setNoteDraft(e.target.value)} onBlur={() => onSetTaskNote(task.id, noteDraft)}
+          placeholder="Any notes for this lecture…" style={{
+            width: "100%", minHeight: 60, background: NAVY_CARD, border: "1px solid var(--border)", borderRadius: 10,
+            padding: 10, color: "var(--text)", fontSize: 12.5, marginBottom: 16
+          }} />
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>PROOF OF COMPLETION</div>
+        <div style={{ background: NAVY_CARD, borderRadius: 12, padding: 12, marginBottom: 16 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, cursor: "pointer" }}>
+            <input type="checkbox" checked={!!st.requireProof} onChange={e => onSetRequireProof(task.id, e.target.checked)} />
+            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Require a proof photo before this can be marked complete</span>
+          </label>
+          <ProofImageManager task={task} st={st} onAddProof={onAddProof} onRemoveProof={onRemoveProof} />
+          {proofBlocking && <div style={{ fontSize: 11, color: REVISION_GOLD, marginTop: 8 }}>⚠ Attach at least one photo before ticking Video complete.</div>}
         </div>
+
+        <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+          {["video", "dpp", "notes"].map(k => {
+            const disabled = k === "video" && proofBlocking;
+            return (
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 5, opacity: disabled ? 0.4 : 1 }}>
+                <TickBox checked={!!st[k]} size={17} color={style.accent} />
+                <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{k === "video" ? "Video" : k === "dpp" ? "DPP" : "Notes"}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {isSkipped ? (
+          <button onClick={() => onUnskipTask(task.id)} style={{
+            width: "100%", background: "none", color: "var(--text-dim)", border: "1px solid var(--border)", borderRadius: 10,
+            padding: "10px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer"
+          }}>Un-skip this task</button>
+        ) : (
+          <button onClick={() => { const reason = prompt("Reason for skipping (optional):") || ""; onSkipTask(task.id, reason); }} style={{
+            width: "100%", background: "none", color: URGENT_RED, border: `1px solid ${URGENT_RED}55`, borderRadius: 10,
+            padding: "10px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer"
+          }}>Skip this task</button>
+        )}
       </div>
     </div>
   );
@@ -2457,6 +2572,7 @@ const MORE_ITEMS = [
   { key: "analytics", label: "Analytics", icon: BarChart3, color: "#14B8A6" },
   { key: "heatmap", label: "Weak-Spot Heatmap", icon: AlertTriangle, color: REVISION_GOLD },
   { key: "history", label: "History", icon: HistoryIcon, color: "var(--text-muted)" },
+  { key: "completedHistory", label: "Completed History", icon: CheckCircle2, color: "#22C55E" },
   { key: "integrity", label: "Integrity Check", icon: AlertTriangle, color: URGENT_RED },
   { key: "import", label: "Import Planner", icon: Upload, color: "#14B8A6" },
   { key: "settings", label: "Settings", icon: Settings, color: "var(--text-muted)" },
@@ -2510,6 +2626,7 @@ export default function App() {
   const [tests, setTests] = useState([]);
   const [importedPlanner, setImportedPlanner] = useState([]);
   const [spacedStates, setSpacedStates] = useState({});
+  const [completedHistory, setCompletedHistory] = useState([]);
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [themeMode, setThemeMode] = useState("dark");
@@ -2537,7 +2654,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -2551,6 +2668,7 @@ export default function App() {
         loadBlob("importedPlanner", []),
         loadBlob("spacedStates", {}),
         loadBlob("backlogTrend", {}),
+        loadBlob("completedHistory", []),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -2617,6 +2735,7 @@ export default function App() {
       setTelegramChannels(settings.telegramChannels || {});
       setImportedPlanner(impPlan);
       setSpacedStates(spaced);
+      setCompletedHistory(compHist);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -2625,13 +2744,21 @@ export default function App() {
     setTaskStates(prev => {
       const cur = prev[task.id] || {};
       const newVal = !cur[field];
+
+      // Proof gate: if this task requires proof, block ticking "video" true
+      // until at least one proof image is attached. Never blocks un-ticking.
+      if (field === "video" && newVal && cur.requireProof && !(cur.proofImages && cur.proofImages.length > 0)) {
+        pushHistory(`⚠️ Blocked — proof required before completing ${task.s} L${task.l}: ${task.t}`);
+        return prev;
+      }
+
       const updated = { ...cur, [field]: newVal };
       if (!updated.createdAt) updated.createdAt = new Date().toISOString();
       if (updated.video && updated.dpp && updated.notes && !cur.completedAt) {
         updated.completedAt = new Date().toISOString();
         updated.status = "Completed";
       } else if (!(updated.video && updated.dpp && updated.notes)) {
-        updated.status = "In Progress";
+        updated.status = updated.status === "Skipped" ? "Skipped" : "In Progress";
         delete updated.completedAt;
       }
       const next = { ...prev, [task.id]: updated };
@@ -2639,10 +2766,87 @@ export default function App() {
       pushHistory(`${newVal ? "✅" : "↩️"} ${field.toUpperCase()} ${newVal ? "done" : "unmarked"} — ${task.s} L${task.l}: ${task.t}`);
       if (updated.status === "Completed" && cur.status !== "Completed") {
         pushHistory(`🏁 COMPLETED — ${task.s} L${task.l}: ${task.t}`);
+        recordCompletedHistory(task, updated);
       }
       return next;
     });
   }, [pushHistory]);
+
+  // Structured, de-duplicated completion record — separate from the free-text
+  // activity log, meant for Analytics/export. Only ever written once per task.
+  const recordCompletedHistory = useCallback((task, updatedState) => {
+    setCompletedHistory(prev => {
+      if (prev.some(r => r.taskId === task.id)) return prev; // no duplicates, ever
+      const record = {
+        taskId: task.id, title: task.t, subject: task.s, chapter: task.c,
+        completionTime: updatedState.completedAt, durationMinutes: (updatedState.actualHours || 0) * 60,
+        proofRef: (updatedState.proofImages && updatedState.proofImages.length) ? `${updatedState.proofImages.length} photo(s)` : null,
+      };
+      const next = [...prev, record];
+      saveBlob("completedHistory", next);
+      return next;
+    });
+  }, []);
+
+  const onAddProof = useCallback((taskId, imageDataUrl) => {
+    setTaskStates(prev => {
+      const cur = prev[taskId] || {};
+      const images = [...(cur.proofImages || []), imageDataUrl];
+      const next = { ...prev, [taskId]: { ...cur, proofImages: images } };
+      saveBlob("taskStates", next);
+      pushHistory(`📷 Proof photo added — ${taskId}`);
+      return next;
+    });
+  }, [pushHistory]);
+
+  const onRemoveProof = useCallback((taskId, index) => {
+    setTaskStates(prev => {
+      const cur = prev[taskId] || {};
+      const images = (cur.proofImages || []).filter((_, i) => i !== index);
+      const next = { ...prev, [taskId]: { ...cur, proofImages: images } };
+      saveBlob("taskStates", next);
+      return next;
+    });
+  }, []);
+
+  const onSetRequireProof = useCallback((taskId, required) => {
+    setTaskStates(prev => {
+      const cur = prev[taskId] || {};
+      const next = { ...prev, [taskId]: { ...cur, requireProof: required } };
+      saveBlob("taskStates", next);
+      return next;
+    });
+  }, []);
+
+  const onSetTaskNote = useCallback((taskId, note) => {
+    setTaskStates(prev => {
+      const cur = prev[taskId] || {};
+      if (cur.taskNote === note) return prev;
+      const next = { ...prev, [taskId]: { ...cur, taskNote: note } };
+      saveBlob("taskStates", next);
+      return next;
+    });
+  }, []);
+
+  const onSkipTask = useCallback((taskId, reason) => {
+    setTaskStates(prev => {
+      const cur = prev[taskId] || {};
+      const next = { ...prev, [taskId]: { ...cur, status: "Skipped", skipReason: reason || "" } };
+      saveBlob("taskStates", next);
+      const task = PLANNER.find(t => t.id === taskId);
+      pushHistory(`⏭️ SKIPPED — ${task ? `${task.s} L${task.l}: ${task.t}` : taskId}${reason ? ` (${reason})` : ""}`);
+      return next;
+    });
+  }, [pushHistory]);
+
+  const onUnskipTask = useCallback((taskId) => {
+    setTaskStates(prev => {
+      const cur = prev[taskId] || {};
+      const next = { ...prev, [taskId]: { ...cur, status: "In Progress", skipReason: "" } };
+      saveBlob("taskStates", next);
+      return next;
+    });
+  }, []);
 
   const setSubjectHours = useCallback((date, subject, hours) => {
     setStudyHoursState(prev => {
@@ -2849,13 +3053,16 @@ export default function App() {
         {tab === "more" && moreTab === "analytics" && (<><SubPageHeader title="Analytics" onBack={() => setMoreTab(null)} /><AnalyticsPage taskStates={taskStates} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} mistakes={mistakes} tests={tests} today={today} /></>)}
         {tab === "more" && moreTab === "heatmap" && (<><SubPageHeader title="Weak-Spot Heatmap" onBack={() => setMoreTab(null)} /><WeakSpotHeatmapPage mistakes={mistakes} pyqStates={pyqStates} /></>)}
         {tab === "more" && moreTab === "history" && (<><SubPageHeader title="History" onBack={() => setMoreTab(null)} /><HistoryPage history={history} /></>)}
+        {tab === "more" && moreTab === "completedHistory" && (<><SubPageHeader title="Completed History" onBack={() => setMoreTab(null)} /><CompletedHistoryPage completedHistory={completedHistory} /></>)}
         {tab === "more" && moreTab === "integrity" && (<><SubPageHeader title="Data Integrity Check" onBack={() => setMoreTab(null)} /><IntegrityCheckPage taskStates={taskStates} missedRecords={missedRecords} /></>)}
         {tab === "more" && moreTab === "import" && (<><SubPageHeader title="Import Planner" onBack={() => setMoreTab(null)} /><PlannerImportPage importedPlanner={importedPlanner} onImport={onImportPlanner} /></>)}
         {tab === "more" && moreTab === "settings" && (<><SubPageHeader title="Settings" onBack={() => setMoreTab(null)} /><SettingsPage themeMode={themeMode} onChangeTheme={onChangeTheme} dailyTargetHours={dailyTargetHours} onChangeTarget={onChangeTarget} examDate={examDate} onChangeExamDate={onChangeExamDate} onExportData={onExportData} userEmail={userEmail} onLogout={onLogout} /></>)}
         {tab === "more" && moreTab === "telegram" && (<><SubPageHeader title="Telegram Sync" onBack={() => setMoreTab(null)} /><TelegramSyncPage taskStates={taskStates} onLinkTelegram={onLinkTelegram} telegramChannels={telegramChannels} onSaveChannel={onSaveTelegramChannel} /></>)}
       </div>
 
-      <TaskDetailModal task={selectedTask} taskStates={taskStates} missedRecords={missedRecords} onClose={() => setSelectedTask(null)} />
+      <TaskDetailModal task={selectedTask} taskStates={taskStates} missedRecords={missedRecords} onClose={() => setSelectedTask(null)}
+        onAddProof={onAddProof} onRemoveProof={onRemoveProof} onSetRequireProof={onSetRequireProof} onSetTaskNote={onSetTaskNote}
+        onSkipTask={onSkipTask} onUnskipTask={onUnskipTask} />
 
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "var(--nav-bg)", borderTop: "1px solid var(--border2)", display: "flex", justifyContent: "space-around", padding: "8px 4px calc(8px + env(safe-area-inset-bottom))", zIndex: 20 }}>
         {NAV_ITEMS.map(item => {
