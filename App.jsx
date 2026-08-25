@@ -1003,13 +1003,64 @@ function NcertRoundRow({ subj, round, dueDate, plannedDate, ncertStates, onToggl
   );
 }
 
-function NcertPage({ ncertStates, onToggle, today }) {
+/* ============================================================
+   PHASE 6 — Per-chapter view for NCERT/Revision: shows every
+   round's status in one row per chapter (matrix), plus last
+   completed / next due, and lets you reschedule an overdue
+   round to a new date instead of leaving it silently stuck.
+   ============================================================ */
+function ChapterMatrixView({ subj, chapters, rounds, states, taskPrefixFn, onToggle, today, accent, overrides, onReschedule }) {
+  return (
+    <div>
+      {chapters.map((ch, ci) => {
+        const cellData = rounds.map(({ round, dueDate }) => {
+          const taskId = taskPrefixFn(ci, round);
+          const st = states[taskId];
+          const effectiveDue = (overrides && overrides[taskId]) || dueDate;
+          const overdue = effectiveDue < today && !st?.done;
+          return { round, taskId, done: !!st?.done, dueDate: effectiveDue, overdue, completedAt: st?.completedAt };
+        });
+        const lastCompleted = [...cellData].reverse().find(c => c.done);
+        const nextDue = cellData.find(c => !c.done);
+        return (
+          <div key={ch} style={{ background: NAVY_CARD, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{ch}</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}>
+              {cellData.map(c => (
+                <button key={c.round} onClick={() => onToggle(c.taskId, subj, ch, c.round)} title={`R${c.round} · due ${fmtDate(c.dueDate)}`} style={{
+                  width: 26, height: 26, borderRadius: 6, border: "none", cursor: "pointer", fontSize: 10, fontWeight: 700,
+                  background: c.done ? accent : c.overdue ? `${URGENT_RED}33` : "var(--input-bg)",
+                  color: c.done ? "#0B1220" : c.overdue ? URGENT_RED : "var(--text-muted)"
+                }}>{c.done ? "✓" : c.overdue ? "!" : c.round}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+              {lastCompleted ? `Last: R${lastCompleted.round} on ${lastCompleted.completedAt ? fmtDate(lastCompleted.completedAt.slice(0, 10)) : ""}` : "Not started"}
+              {nextDue && ` · Next: R${nextDue.round} due ${fmtDate(nextDue.dueDate)}`}
+            </div>
+            {nextDue?.overdue && (
+              <button onClick={() => onReschedule(nextDue.taskId, addDays(today, 3))} style={{
+                marginTop: 6, background: "none", border: `1px solid ${URGENT_RED}55`, color: URGENT_RED, borderRadius: 6,
+                padding: "4px 10px", fontSize: 10.5, cursor: "pointer"
+              }}>Reschedule R{nextDue.round} to {fmtDate(addDays(today, 3))}</button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function NcertPage({ ncertStates, onToggle, today, dueDateOverrides, onReschedule }) {
   const [subj, setSubj] = useState("Zoology");
+  const [view, setView] = useState("rounds"); // rounds | chapters
   const style = SUBJECT_STYLE[subj];
 
   const overallDone = NCERT_TASKS.filter(t => ncertStates[t.taskId]?.done && t.subject === subj).length;
   const overallTotal = NCERT_TASKS.filter(t => t.subject === subj).length;
   const overallPct = (overallDone / overallTotal) * 100;
+  const chapters = ncertChapters(subj);
+  const prefix = subj === "Zoology" ? "ZOO" : "BOT";
 
   return (
     <div>
@@ -1034,9 +1085,28 @@ function NcertPage({ ncertStates, onToggle, today }) {
         </div>
       </div>
 
-      {NCERT_ROUND_SCHEDULE.map(({ round, plannedDate, dueDate }) => (
-        <NcertRoundRow key={round} subj={subj} round={round} dueDate={dueDate} plannedDate={plannedDate} ncertStates={ncertStates} onToggle={onToggle} today={today} />
-      ))}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setView("rounds")} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer", background: view === "rounds" ? style.accent : NAVY_CARD, color: view === "rounds" ? "var(--input-bg)" : "var(--text-dim)", fontSize: 11.5, fontWeight: 700 }}>By Round</button>
+        <button onClick={() => setView("chapters")} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer", background: view === "chapters" ? style.accent : NAVY_CARD, color: view === "chapters" ? "var(--input-bg)" : "var(--text-dim)", fontSize: 11.5, fontWeight: 700 }}>By Chapter</button>
+      </div>
+
+      {view === "rounds"
+        ? NCERT_ROUND_SCHEDULE.map(({ round, plannedDate, dueDate }) => (
+            <NcertRoundRow key={round} subj={subj} round={round} dueDate={dueDate} plannedDate={plannedDate} ncertStates={ncertStates} onToggle={onToggle} today={today} />
+          ))
+        : <ChapterMatrixView
+            subj={subj}
+            chapters={chapters}
+            rounds={NCERT_ROUND_SCHEDULE}
+            states={ncertStates}
+            taskPrefixFn={(ci, round) => `NCERT-${prefix}-R${round}-${String(ci + 1).padStart(2, "0")}`}
+            onToggle={onToggle}
+            today={today}
+            accent={style.accent}
+            overrides={dueDateOverrides}
+            onReschedule={onReschedule}
+          />
+      }
     </div>
   );
 }
@@ -1106,8 +1176,9 @@ function RoundRow({ subj, round, dueDate, chapters, states, storeKey, onToggle, 
   );
 }
 
-function RevisionPage({ revisionStates, onToggle, today }) {
+function RevisionPage({ revisionStates, onToggle, today, dueDateOverrides, onReschedule }) {
   const [subj, setSubj] = useState("Physics");
+  const [view, setView] = useState("rounds");
   const style = SUBJECT_STYLE[subj];
   const chapters = subjectChapters(subj);
   const prefix = "REV-" + SUBJ_PREFIX[subj];
@@ -1138,9 +1209,29 @@ function RevisionPage({ revisionStates, onToggle, today }) {
           <div style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{doneTasks} / {totalTasks} chapter-rounds</div>
         </div>
       </div>
-      {REVISION_ROUND_SCHEDULE.map(({ round, dueDate }) => (
-        <RoundRow key={round} subj={subj} round={round} dueDate={dueDate} chapters={chapters} states={revisionStates} onToggle={onToggle} today={today} accent={style.accent} taskPrefix={prefix} />
-      ))}
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setView("rounds")} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer", background: view === "rounds" ? style.accent : NAVY_CARD, color: view === "rounds" ? "var(--input-bg)" : "var(--text-dim)", fontSize: 11.5, fontWeight: 700 }}>By Round</button>
+        <button onClick={() => setView("chapters")} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer", background: view === "chapters" ? style.accent : NAVY_CARD, color: view === "chapters" ? "var(--input-bg)" : "var(--text-dim)", fontSize: 11.5, fontWeight: 700 }}>By Chapter</button>
+      </div>
+
+      {view === "rounds"
+        ? REVISION_ROUND_SCHEDULE.map(({ round, dueDate }) => (
+            <RoundRow key={round} subj={subj} round={round} dueDate={dueDate} chapters={chapters} states={revisionStates} onToggle={onToggle} today={today} accent={style.accent} taskPrefix={prefix} />
+          ))
+        : <ChapterMatrixView
+            subj={subj}
+            chapters={chapters}
+            rounds={REVISION_ROUND_SCHEDULE}
+            states={revisionStates}
+            taskPrefixFn={(ci, round) => `${prefix}-R${round}-${String(ci + 1).padStart(2, "0")}`}
+            onToggle={onToggle}
+            today={today}
+            accent={style.accent}
+            overrides={dueDateOverrides}
+            onReschedule={onReschedule}
+          />
+      }
     </div>
   );
 }
@@ -3002,6 +3093,7 @@ export default function App() {
   const [backlogSettings, setBacklogSettings] = useState({ backlogStartDate: "2026-08-20", weekdayQuota: 2, sundayQuota: 3 });
   const [plannerLock, setPlannerLock] = useState("Unlocked");
   const [plannerVersions, setPlannerVersions] = useState([]);
+  const [dueDateOverrides, setDueDateOverrides] = useState({});
   const [scheduleVersion, setScheduleVersion] = useState(0); // bump to force re-render after recomputeBacklogSchedule
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -3030,7 +3122,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -3047,6 +3139,7 @@ export default function App() {
         loadBlob("completedHistory", []),
         loadBlob("assignments", []),
         loadBlob("plannerVersions", []),
+        loadBlob("dueDateOverrides", {}),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -3125,6 +3218,7 @@ export default function App() {
       setCompletedHistory(compHist);
       setAssignments(assigns);
       setPlannerVersions(versions);
+      setDueDateOverrides(overrides);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -3361,6 +3455,15 @@ export default function App() {
     });
   }, [pushHistory]);
 
+  const onRescheduleDue = useCallback((taskId, newDate) => {
+    setDueDateOverrides(prev => {
+      const next = { ...prev, [taskId]: newDate };
+      saveBlob("dueDateOverrides", next);
+      pushHistory(`📅 Rescheduled ${taskId} to ${fmtDate(newDate)} (was overdue)`);
+      return next;
+    });
+  }, [pushHistory]);
+
   const onPyqUpdate = useCallback((taskId, year, subj, patch) => {
     setPyqStates(prev => {
       const cur = prev[taskId] || {};
@@ -3510,8 +3613,8 @@ export default function App() {
         {tab === "more" && moreTab === "search" && (<><SubPageHeader title="Search & Filter" onBack={() => setMoreTab(null)} /><SearchPage taskStates={taskStates} missedRecords={missedRecords} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} today={today} /></>)}
         {tab === "more" && moreTab === "assignments" && (<><SubPageHeader title="Assignments" onBack={() => setMoreTab(null)} /><AssignmentsPage assignments={assignments} today={today} onAdd={onAddAssignment} onComplete={onCompleteAssignment} onSkip={onSkipAssignment} onAddProof={onAddAssignmentProof} onRemoveProof={onRemoveAssignmentProof} onToggleRequireProof={onToggleAssignmentRequireProof} /></>)}
         {tab === "more" && moreTab === "dpp" && (<><SubPageHeader title="DPP Tracker" onBack={() => setMoreTab(null)} /><DppPage taskStates={taskStates} onToggle={onToggle} /></>)}
-        {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} /></>)}
-        {tab === "more" && moreTab === "revision" && (<><SubPageHeader title="Revision 5x Tracker" onBack={() => setMoreTab(null)} /><RevisionPage revisionStates={revisionStates} onToggle={onRevisionToggle} today={today} /></>)}
+        {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
+        {tab === "more" && moreTab === "revision" && (<><SubPageHeader title="Revision 5x Tracker" onBack={() => setMoreTab(null)} /><RevisionPage revisionStates={revisionStates} onToggle={onRevisionToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
         {tab === "more" && moreTab === "pyq" && (<><SubPageHeader title="PYQ Tracker (1990-2026)" onBack={() => setMoreTab(null)} /><PyqPage pyqStates={pyqStates} onUpdate={onPyqUpdate} /></>)}
         {tab === "more" && moreTab === "mistakes" && (<><SubPageHeader title="Mistake Book" onBack={() => setMoreTab(null)} /><MistakeBookPage mistakes={mistakes} onAdd={onAddMistake} onResolve={onResolveMistake} /></>)}
         {tab === "more" && moreTab === "tests" && (<><SubPageHeader title="Test Analysis" onBack={() => setMoreTab(null)} /><TestAnalysisPage tests={tests} onAdd={onAddTest} /></>)}
