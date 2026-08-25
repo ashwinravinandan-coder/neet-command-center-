@@ -574,7 +574,7 @@ function SpacedRepetitionSection({ dueList, spacedStates, onSpacedToggle }) {
   );
 }
 
-function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords, studyHours, setSubjectHours, today, target, examDate, ncertStates, revisionStates, pyqStates, spacedStates, onSpacedToggle, isBufferDay, assignments, onCompleteAssignment }) {
+function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords, studyHours, setSubjectHours, today, target, examDate, ncertStates, revisionStates, pyqStates, spacedStates, onSpacedToggle, isBufferDay, assignments, onCompleteAssignment, mistakes, onResolveMistake }) {
   const liveToday = RAW_LIVE.filter(t => t.d === today);
   const { overdueBacklog, openMissed } = deriveCarryForward(today, taskStates, missedRecords);
   const nextQueue = nextBacklogQueue(taskStates, 6, today);
@@ -585,6 +585,7 @@ function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords,
     const st = computeAssignmentStatus(a, today);
     return (st === "Overdue" || a.dueDate === today) && st !== "Completed" && st !== "Skipped";
   });
+  const mistakesDue = (mistakes || []).filter(m => m.retestDate && m.retestDate <= today && m.status !== "Resolved");
 
   const hToday = studyHours[today] || {};
   const totalToday = Object.values(hToday).reduce((a, b) => a + (b || 0), 0);
@@ -646,6 +647,26 @@ function TodayPage({ taskStates, onToggle, onHours, onOpenDetail, missedRecords,
                   marginTop: 8, background: "#22C55E", color: "#0B1220", border: "none", borderRadius: 8, padding: "7px 14px",
                   fontSize: 11.5, fontWeight: 700, cursor: "pointer", opacity: (!!a.requireProof && !(a.proofImages || []).length) ? 0.4 : 1
                 }}>✓ Mark Complete</button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {mistakesDue.length > 0 && (
+        <>
+          <SectionHeader icon="❌" title="MISTAKE REVISION DUE" count={mistakesDue.length} color={REVISION_GOLD} />
+          {mistakesDue.map(m => {
+            const style = SUBJECT_STYLE[m.subject] || {};
+            return (
+              <div key={m.id} style={{ background: NAVY_CARD2, borderRadius: 12, padding: 12, marginBottom: 8, borderLeft: `4px solid ${REVISION_GOLD}` }}>
+                <Pill text={`${style.emoji || ""} ${m.subject}`} color={style.accent || "#64748B"} />
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginTop: 4 }}>{m.chapter} — {m.topic}</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 3 }}>{m.correctConcept}</div>
+                <button onClick={() => onResolveMistake(m.id)} style={{
+                  marginTop: 8, background: "#22C55E", color: "#0B1220", border: "none", borderRadius: 8, padding: "7px 14px",
+                  fontSize: 11.5, fontWeight: 700, cursor: "pointer"
+                }}>✓ Revised — Resolve</button>
               </div>
             );
           })}
@@ -1329,7 +1350,11 @@ function PyqPage({ pyqStates, onUpdate }) {
    MODULE 5a — MISTAKE BOOK
    ============================================================ */
 function MistakeForm({ onSave, onCancel }) {
-  const [f, setF] = useState({ date: todayISO(), subject: "Physics", chapter: "", topic: "", questionSource: "", errorType: "Conceptual", whatWentWrong: "", correctConcept: "", correction: "", retestDate: "", imageData: null });
+  const [f, setF] = useState({
+    date: todayISO(), subject: "Physics", chapter: "", topic: "", question: "",
+    questionSource: "", wrongAnswer: "", correctAnswer: "", errorType: "Conceptual", difficulty: "Moderate",
+    whatWentWrong: "", correctConcept: "", correction: "", tags: "", retestDate: "", images: [],
+  });
   const [imgWarning, setImgWarning] = useState("");
   const upd = (k, v) => setF(prev => ({ ...prev, [k]: v }));
   const handleFile = (e) => {
@@ -1341,9 +1366,11 @@ function MistakeForm({ onSave, onCancel }) {
       setImgWarning("");
     }
     const reader = new FileReader();
-    reader.onload = () => upd("imageData", reader.result);
+    reader.onload = () => setF(prev => ({ ...prev, images: [...prev.images, reader.result] }));
     reader.readAsDataURL(file);
   };
+  const removeImage = (idx) => setF(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+
   return (
     <div style={{ background: NAVY_CARD2, borderRadius: 14, padding: 14, marginBottom: 14 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
@@ -1354,18 +1381,36 @@ function MistakeForm({ onSave, onCancel }) {
       </div>
       <input placeholder="Chapter" value={f.chapter} onChange={e => upd("chapter", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
       <input placeholder="Topic" value={f.topic} onChange={e => upd("topic", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+      <textarea placeholder="Question (text, optional if photo attached)" value={f.question} onChange={e => upd("question", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8, minHeight: 44 }} />
       <input placeholder="Question source (DPP / Test / PYQ)" value={f.questionSource} onChange={e => upd("questionSource", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
-      <select value={f.errorType} onChange={e => upd("errorType", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }}>
-        {["Conceptual", "Calculation", "Silly Mistake", "Time Pressure", "Misread Question", "Formula Error"].map(x => <option key={x}>{x}</option>)}
-      </select>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <input placeholder="Your (wrong) answer" value={f.wrongAnswer} onChange={e => upd("wrongAnswer", e.target.value)} style={inputStyle} />
+        <input placeholder="Correct answer" value={f.correctAnswer} onChange={e => upd("correctAnswer", e.target.value)} style={inputStyle} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <select value={f.errorType} onChange={e => upd("errorType", e.target.value)} style={inputStyle}>
+          {["Conceptual", "Calculation", "Silly Mistake", "Formula", "Memory", "Reading Error", "Time Management"].map(x => <option key={x}>{x}</option>)}
+        </select>
+        <select value={f.difficulty} onChange={e => upd("difficulty", e.target.value)} style={inputStyle}>
+          <option>Easy</option><option>Moderate</option><option>Hard</option>
+        </select>
+      </div>
       <textarea placeholder="What went wrong" value={f.whatWentWrong} onChange={e => upd("whatWentWrong", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8, minHeight: 50 }} />
-      <textarea placeholder="Correct concept" value={f.correctConcept} onChange={e => upd("correctConcept", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8, minHeight: 50 }} />
-      <input placeholder="Correction / how to avoid next time" value={f.correction} onChange={e => upd("correction", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+      <textarea placeholder="Explanation / correct concept" value={f.correctConcept} onChange={e => upd("correctConcept", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8, minHeight: 50 }} />
+      <input placeholder="Correct method / how to avoid next time" value={f.correction} onChange={e => upd("correction", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+      <input placeholder="Tags (comma separated, e.g. formula, silly, unit-error)" value={f.tags} onChange={e => upd("tags", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
       <input type="date" placeholder="Re-test date" value={f.retestDate} onChange={e => upd("retestDate", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
       <div style={{ marginBottom: 8 }}>
-        <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>📷 Attach photo of the question (optional)</label>
+        <label style={{ fontSize: 11, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>📷 Attach photo(s) of the question</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+          {f.images.map((img, idx) => (
+            <div key={idx} style={{ position: "relative", width: 64, height: 64 }}>
+              <img src={img} alt={`q${idx}`} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }} />
+              <button onClick={() => removeImage(idx)} style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: 9, background: URGENT_RED, color: "#fff", border: "none", fontSize: 10, cursor: "pointer" }}>✕</button>
+            </div>
+          ))}
+        </div>
         <input type="file" accept="image/*" onChange={handleFile} style={{ fontSize: 11, color: "var(--text-dim)" }} />
-        {f.imageData && <img src={f.imageData} alt="attached" style={{ maxWidth: "100%", borderRadius: 8, marginTop: 6 }} />}
         {imgWarning && <div style={{ fontSize: 10.5, color: REVISION_GOLD, marginTop: 4 }}>{imgWarning}</div>}
       </div>
       <div style={{ display: "flex", gap: 8 }}>
@@ -1377,10 +1422,13 @@ function MistakeForm({ onSave, onCancel }) {
 }
 const inputStyle = { background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 12.5 };
 
-function MistakeBookPage({ mistakes, onAdd, onResolve }) {
+function MistakeBookPage({ mistakes, onAdd, onResolve, onConvertToRevision, today }) {
   const [showForm, setShowForm] = useState(false);
+  const [tagFilter, setTagFilter] = useState("");
   const unresolved = mistakes.filter(m => m.status !== "Resolved");
   const resolved = mistakes.filter(m => m.status === "Resolved");
+  const allTags = [...new Set(mistakes.flatMap(m => (m.tags || "").split(",").map(t => t.trim()).filter(Boolean)))];
+  const visible = tagFilter ? mistakes.filter(m => (m.tags || "").toLowerCase().includes(tagFilter.toLowerCase())) : mistakes;
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -1390,23 +1438,56 @@ function MistakeBookPage({ mistakes, onAdd, onResolve }) {
         </button>
       </div>
       {showForm && <MistakeForm onSave={(f) => { onAdd(f); setShowForm(false); }} onCancel={() => setShowForm(false)} />}
-      {mistakes.length === 0 && <EmptyNote text="No mistakes logged yet — add one after every test/DPP review." />}
-      {[...mistakes].reverse().map(m => {
+
+      {allTags.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+          <button onClick={() => setTagFilter("")} style={{ padding: "4px 9px", borderRadius: 6, border: "none", cursor: "pointer", background: !tagFilter ? "#3B82F6" : NAVY_CARD, color: !tagFilter ? "#fff" : "var(--text-dim)", fontSize: 10.5 }}>All</button>
+          {allTags.map(t => (
+            <button key={t} onClick={() => setTagFilter(t)} style={{ padding: "4px 9px", borderRadius: 6, border: "none", cursor: "pointer", background: tagFilter === t ? "#3B82F6" : NAVY_CARD, color: tagFilter === t ? "#fff" : "var(--text-dim)", fontSize: 10.5 }}>#{t}</button>
+          ))}
+        </div>
+      )}
+
+      {visible.length === 0 && <EmptyNote text="No mistakes logged yet — add one after every test/DPP review." />}
+      {[...visible].reverse().map(m => {
         const style = SUBJECT_STYLE[m.subject] || { accent: "var(--text-muted)" };
         const isResolved = m.status === "Resolved";
+        const dueForRetest = m.retestDate && m.retestDate <= today && !isResolved;
         return (
-          <div key={m.id} style={{ background: NAVY_CARD2, borderRadius: 12, padding: 12, marginBottom: 8, borderLeft: `4px solid ${isResolved ? "#22C55E" : URGENT_RED}`, opacity: isResolved ? 0.6 : 1 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+          <div key={m.id} style={{ background: NAVY_CARD2, borderRadius: 12, padding: 12, marginBottom: 8, borderLeft: `4px solid ${isResolved ? "#22C55E" : dueForRetest ? REVISION_GOLD : URGENT_RED}`, opacity: isResolved ? 0.6 : 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 4 }}>
               <Pill text={`${style.emoji || ""} ${m.subject}`} color={style.accent} />
-              <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{fmtDate(m.date)}</span>
+              <Pill text={m.difficulty || "Moderate"} color={m.difficulty === "Hard" ? URGENT_RED : m.difficulty === "Easy" ? "#22C55E" : REVISION_GOLD} />
+              <span style={{ fontSize: 10.5, color: "var(--text-muted)", marginLeft: "auto" }}>{fmtDate(m.date)}</span>
             </div>
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{m.chapter} — {m.topic}</div>
+            {m.question && <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 3, fontStyle: "italic" }}>{m.question}</div>}
+            {(m.wrongAnswer || m.correctAnswer) && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                {m.wrongAnswer && <span>❌ {m.wrongAnswer}</span>}{m.wrongAnswer && m.correctAnswer && " · "}{m.correctAnswer && <span style={{ color: "#22C55E" }}>✓ {m.correctAnswer}</span>}
+              </div>
+            )}
             <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 3 }}><b>{m.errorType}:</b> {m.whatWentWrong}</div>
             <div style={{ fontSize: 11.5, color: "#22C55E", marginTop: 2 }}>✓ {m.correctConcept}</div>
-            {m.imageData && <img src={m.imageData} alt="mistake" style={{ maxWidth: "100%", borderRadius: 8, marginTop: 6 }} />}
-            <button onClick={() => onResolve(m.id)} style={{ marginTop: 8, background: "none", border: `1px solid ${isResolved ? "#22C55E" : "var(--border)"}`, color: isResolved ? "#22C55E" : "var(--text-dim)", borderRadius: 6, padding: "4px 10px", fontSize: 10.5, cursor: "pointer" }}>
-              {isResolved ? "✓ Resolved" : "Mark Resolved"}
-            </button>
+            {m.tags && <div style={{ marginTop: 4 }}>{m.tags.split(",").map(t => t.trim()).filter(Boolean).map(t => <span key={t} style={{ fontSize: 9.5, color: "#3B82F6", marginRight: 6 }}>#{t}</span>)}</div>}
+            {(m.images || (m.imageData ? [m.imageData] : [])).length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {(m.images || [m.imageData]).map((img, idx) => (
+                  <img key={idx} src={img} alt="mistake" style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8 }} />
+                ))}
+              </div>
+            )}
+            {m.retestDate && <div style={{ fontSize: 10.5, color: dueForRetest ? REVISION_GOLD : "var(--text-muted)", marginTop: 6 }}>{dueForRetest ? "⏰ Due for retest" : "Retest"}: {fmtDate(m.retestDate)}</div>}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={() => onResolve(m.id)} style={{ background: "none", border: `1px solid ${isResolved ? "#22C55E" : "var(--border)"}`, color: isResolved ? "#22C55E" : "var(--text-dim)", borderRadius: 6, padding: "4px 10px", fontSize: 10.5, cursor: "pointer" }}>
+                {isResolved ? "✓ Resolved" : "Mark Resolved"}
+              </button>
+              {!isResolved && (
+                <button onClick={() => onConvertToRevision(m.id)} style={{ background: "none", border: `1px solid ${REVISION_GOLD}55`, color: REVISION_GOLD, borderRadius: 6, padding: "4px 10px", fontSize: 10.5, cursor: "pointer" }}>
+                  🔁 Revise in 3 days
+                </button>
+              )}
+            </div>
           </div>
         );
       })}
@@ -3496,6 +3577,17 @@ export default function App() {
     });
   }, []);
 
+  const onConvertMistakeToRevision = useCallback((id) => {
+    setMistakes(prev => {
+      const newRetest = addDays(todayISO(), 3);
+      const next = prev.map(m => m.id === id ? { ...m, retestDate: newRetest, needsRevision: true } : m);
+      saveBlob("mistakes", next);
+      const m = next.find(x => x.id === id);
+      if (m) pushHistory(`🔁 Mistake scheduled for revision on ${fmtDate(newRetest)} — ${m.subject}: ${m.chapter}`);
+      return next;
+    });
+  }, [pushHistory]);
+
   const onAddTest = useCallback((f) => {
     setTests(prev => {
       const rec = { ...f, id: `TEST-${Date.now()}`, percentage: (f.score / f.totalMarks) * 100 };
@@ -3603,7 +3695,7 @@ export default function App() {
 
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "12px 16px" }}>
         {tab === "home" && <DashboardPage taskStates={taskStates} studyHours={studyHours} missedRecords={missedRecords} today={today} examDate={examDate} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} />}
-        {tab === "today" && <TodayPage taskStates={taskStates} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} missedRecords={missedRecords} studyHours={studyHours} setSubjectHours={setSubjectHours} today={today} target={dailyTargetHours} examDate={examDate} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} spacedStates={spacedStates} onSpacedToggle={onSpacedToggle} isBufferDay={isBufferDay} assignments={assignments} onCompleteAssignment={onCompleteAssignment} />}
+        {tab === "today" && <TodayPage taskStates={taskStates} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} missedRecords={missedRecords} studyHours={studyHours} setSubjectHours={setSubjectHours} today={today} target={dailyTargetHours} examDate={examDate} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} spacedStates={spacedStates} onSpacedToggle={onSpacedToggle} isBufferDay={isBufferDay} assignments={assignments} onCompleteAssignment={onCompleteAssignment} mistakes={mistakes} onResolveMistake={onResolveMistake} />}
         {tab === "backlog" && <BacklogPage taskStates={taskStates} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} today={today} />}
 
         {tab === "more" && moreTab === null && <MoreMenu onOpen={setMoreTab} />}
@@ -3616,7 +3708,7 @@ export default function App() {
         {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
         {tab === "more" && moreTab === "revision" && (<><SubPageHeader title="Revision 5x Tracker" onBack={() => setMoreTab(null)} /><RevisionPage revisionStates={revisionStates} onToggle={onRevisionToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
         {tab === "more" && moreTab === "pyq" && (<><SubPageHeader title="PYQ Tracker (1990-2026)" onBack={() => setMoreTab(null)} /><PyqPage pyqStates={pyqStates} onUpdate={onPyqUpdate} /></>)}
-        {tab === "more" && moreTab === "mistakes" && (<><SubPageHeader title="Mistake Book" onBack={() => setMoreTab(null)} /><MistakeBookPage mistakes={mistakes} onAdd={onAddMistake} onResolve={onResolveMistake} /></>)}
+        {tab === "more" && moreTab === "mistakes" && (<><SubPageHeader title="Mistake Book" onBack={() => setMoreTab(null)} /><MistakeBookPage mistakes={mistakes} onAdd={onAddMistake} onResolve={onResolveMistake} onConvertToRevision={onConvertMistakeToRevision} today={today} /></>)}
         {tab === "more" && moreTab === "tests" && (<><SubPageHeader title="Test Analysis" onBack={() => setMoreTab(null)} /><TestAnalysisPage tests={tests} onAdd={onAddTest} /></>)}
         {tab === "more" && moreTab === "analytics" && (<><SubPageHeader title="Analytics" onBack={() => setMoreTab(null)} /><AnalyticsPage taskStates={taskStates} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} mistakes={mistakes} tests={tests} today={today} /></>)}
         {tab === "more" && moreTab === "heatmap" && (<><SubPageHeader title="Weak-Spot Heatmap" onBack={() => setMoreTab(null)} /><WeakSpotHeatmapPage mistakes={mistakes} pyqStates={pyqStates} /></>)}
