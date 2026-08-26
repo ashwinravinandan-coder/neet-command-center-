@@ -1349,11 +1349,12 @@ function PyqPage({ pyqStates, onUpdate }) {
 /* ============================================================
    MODULE 5a — MISTAKE BOOK
    ============================================================ */
-function MistakeForm({ onSave, onCancel }) {
+function MistakeForm({ onSave, onCancel, initial }) {
   const [f, setF] = useState({
     date: todayISO(), subject: "Physics", chapter: "", topic: "", question: "",
     questionSource: "", wrongAnswer: "", correctAnswer: "", errorType: "Conceptual", difficulty: "Moderate",
     whatWentWrong: "", correctConcept: "", correction: "", tags: "", retestDate: "", images: [],
+    ...(initial || {}),
   });
   const [imgWarning, setImgWarning] = useState("");
   const upd = (k, v) => setF(prev => ({ ...prev, [k]: v }));
@@ -1498,9 +1499,27 @@ function MistakeBookPage({ mistakes, onAdd, onResolve, onConvertToRevision, toda
 /* ============================================================
    MODULE 5b — TEST ANALYSIS
    ============================================================ */
+function SubjectScoreRow({ row, onChange, onRemove }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr 1fr auto", gap: 6, marginBottom: 6, alignItems: "center" }}>
+      <select value={row.subject} onChange={e => onChange({ ...row, subject: e.target.value })} style={{ ...inputStyle, padding: "6px 8px", fontSize: 11 }}>
+        {SUBJECT_ORDER.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+      <input type="number" placeholder="Score" value={row.score} onChange={e => onChange({ ...row, score: parseInt(e.target.value) || 0 })} style={{ ...inputStyle, padding: "6px 8px", fontSize: 11 }} />
+      <input type="number" placeholder="Correct" value={row.correct} onChange={e => onChange({ ...row, correct: parseInt(e.target.value) || 0 })} style={{ ...inputStyle, padding: "6px 8px", fontSize: 11 }} />
+      <input type="number" placeholder="Wrong" value={row.wrong} onChange={e => onChange({ ...row, wrong: parseInt(e.target.value) || 0 })} style={{ ...inputStyle, padding: "6px 8px", fontSize: 11 }} />
+      <button onClick={onRemove} style={{ background: "none", border: "none", color: URGENT_RED, cursor: "pointer", fontSize: 13 }}>✕</button>
+    </div>
+  );
+}
+
 function TestForm({ onSave, onCancel }) {
-  const [f, setF] = useState({ testName: "", date: todayISO(), subject: "Physics", totalMarks: 720, score: "", correct: "", wrong: "", unattempted: "", weakAreas: "", notes: "" });
+  const [f, setF] = useState({ testName: "", date: todayISO(), subject: "Physics", totalMarks: 720, score: "", correct: "", wrong: "", unattempted: "", timeTakenMinutes: "", weakAreas: "", notes: "", subjectBreakdown: [] });
   const upd = (k, v) => setF(prev => ({ ...prev, [k]: v }));
+  const addSubjectRow = () => upd("subjectBreakdown", [...f.subjectBreakdown, { subject: "Physics", score: 0, correct: 0, wrong: 0 }]);
+  const updateSubjectRow = (idx, row) => upd("subjectBreakdown", f.subjectBreakdown.map((r, i) => i === idx ? row : r));
+  const removeSubjectRow = (idx) => upd("subjectBreakdown", f.subjectBreakdown.filter((_, i) => i !== idx));
+
   return (
     <div style={{ background: NAVY_CARD2, borderRadius: 14, padding: 14, marginBottom: 14 }}>
       <input placeholder="Test name" value={f.testName} onChange={e => upd("testName", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
@@ -1520,6 +1539,14 @@ function TestForm({ onSave, onCancel }) {
         <input type="number" placeholder="Wrong" value={f.wrong} onChange={e => upd("wrong", parseInt(e.target.value) || 0)} style={inputStyle} />
         <input type="number" placeholder="Unattempted" value={f.unattempted} onChange={e => upd("unattempted", parseInt(e.target.value) || 0)} style={inputStyle} />
       </div>
+      <input type="number" placeholder="Time taken (minutes)" value={f.timeTakenMinutes} onChange={e => upd("timeTakenMinutes", parseInt(e.target.value) || 0)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>Subject-wise breakdown (optional, useful for full-syllabus tests)</div>
+      {f.subjectBreakdown.map((row, idx) => (
+        <SubjectScoreRow key={idx} row={row} onChange={r => updateSubjectRow(idx, r)} onRemove={() => removeSubjectRow(idx)} />
+      ))}
+      <button onClick={addSubjectRow} style={{ background: "none", border: "1px dashed var(--border)", color: "var(--text-dim)", borderRadius: 6, padding: "5px 10px", fontSize: 10.5, cursor: "pointer", marginBottom: 8 }}>+ Add subject row</button>
+
       <input placeholder="Weak areas" value={f.weakAreas} onChange={e => upd("weakAreas", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
       <textarea placeholder="Notes" value={f.notes} onChange={e => upd("notes", e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 10, minHeight: 50 }} />
       <div style={{ display: "flex", gap: 8 }}>
@@ -1530,8 +1557,9 @@ function TestForm({ onSave, onCancel }) {
   );
 }
 
-function TestAnalysisPage({ tests, onAdd }) {
+function TestAnalysisPage({ tests, onAdd, onAddMistakeFromTest }) {
   const [showForm, setShowForm] = useState(false);
+  const [mistakeFromTest, setMistakeFromTest] = useState(null);
   const avgPct = tests.length ? (tests.reduce((s, t) => s + (t.score / t.totalMarks) * 100, 0) / tests.length) : 0;
   const maxH = Math.max(100, ...tests.map(t => (t.score / t.totalMarks) * 100));
   return (
@@ -1543,6 +1571,13 @@ function TestAnalysisPage({ tests, onAdd }) {
         </button>
       </div>
       {showForm && <TestForm onSave={(f) => { onAdd(f); setShowForm(false); }} onCancel={() => setShowForm(false)} />}
+      {mistakeFromTest && (
+        <MistakeForm
+          initial={{ questionSource: mistakeFromTest.testName }}
+          onSave={(f) => { onAddMistakeFromTest(f); setMistakeFromTest(null); }}
+          onCancel={() => setMistakeFromTest(null)}
+        />
+      )}
       {tests.length > 1 && (
         <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 14, marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>Score trend</div>
@@ -1567,10 +1602,26 @@ function TestAnalysisPage({ tests, onAdd }) {
             <div style={{ display: "flex", gap: 14, marginTop: 6 }}>
               <span style={{ fontSize: 18, fontWeight: 700, color: pct >= 60 ? "#22C55E" : pct >= 40 ? REVISION_GOLD : URGENT_RED }}>{pct}%</span>
               <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                {t.score}/{t.totalMarks}<br />Accuracy {acc}%
+                {t.score}/{t.totalMarks}<br />Accuracy {acc}%{t.timeTakenMinutes ? ` · ${t.timeTakenMinutes}min` : ""}
               </div>
             </div>
+            {t.subjectBreakdown && t.subjectBreakdown.length > 0 && (
+              <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {t.subjectBreakdown.map((row, idx) => {
+                  const style = SUBJECT_STYLE[row.subject] || {};
+                  return (
+                    <div key={idx} style={{ background: NAVY_CARD, borderRadius: 8, padding: "5px 8px", fontSize: 10.5 }}>
+                      <span style={{ color: style.accent }}>{style.emoji} {row.subject}</span>: <b style={{ color: "var(--text-dim)" }}>{row.score} ({row.correct}✓ {row.wrong}✗)</b>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {t.weakAreas && <div style={{ fontSize: 11, color: URGENT_RED, marginTop: 6 }}>Weak: {t.weakAreas}</div>}
+            <button onClick={() => setMistakeFromTest({ testName: t.testName })} style={{
+              marginTop: 8, background: "none", border: `1px solid ${URGENT_RED}55`, color: URGENT_RED, borderRadius: 6,
+              padding: "5px 10px", fontSize: 10.5, cursor: "pointer"
+            }}>❌ Log a mistake from this test</button>
           </div>
         );
       })}
@@ -3709,7 +3760,7 @@ export default function App() {
         {tab === "more" && moreTab === "revision" && (<><SubPageHeader title="Revision 5x Tracker" onBack={() => setMoreTab(null)} /><RevisionPage revisionStates={revisionStates} onToggle={onRevisionToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
         {tab === "more" && moreTab === "pyq" && (<><SubPageHeader title="PYQ Tracker (1990-2026)" onBack={() => setMoreTab(null)} /><PyqPage pyqStates={pyqStates} onUpdate={onPyqUpdate} /></>)}
         {tab === "more" && moreTab === "mistakes" && (<><SubPageHeader title="Mistake Book" onBack={() => setMoreTab(null)} /><MistakeBookPage mistakes={mistakes} onAdd={onAddMistake} onResolve={onResolveMistake} onConvertToRevision={onConvertMistakeToRevision} today={today} /></>)}
-        {tab === "more" && moreTab === "tests" && (<><SubPageHeader title="Test Analysis" onBack={() => setMoreTab(null)} /><TestAnalysisPage tests={tests} onAdd={onAddTest} /></>)}
+        {tab === "more" && moreTab === "tests" && (<><SubPageHeader title="Test Analysis" onBack={() => setMoreTab(null)} /><TestAnalysisPage tests={tests} onAdd={onAddTest} onAddMistakeFromTest={onAddMistake} /></>)}
         {tab === "more" && moreTab === "analytics" && (<><SubPageHeader title="Analytics" onBack={() => setMoreTab(null)} /><AnalyticsPage taskStates={taskStates} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} mistakes={mistakes} tests={tests} today={today} /></>)}
         {tab === "more" && moreTab === "heatmap" && (<><SubPageHeader title="Weak-Spot Heatmap" onBack={() => setMoreTab(null)} /><WeakSpotHeatmapPage mistakes={mistakes} pyqStates={pyqStates} /></>)}
         {tab === "more" && moreTab === "history" && (<><SubPageHeader title="History" onBack={() => setMoreTab(null)} /><HistoryPage history={history} /></>)}
