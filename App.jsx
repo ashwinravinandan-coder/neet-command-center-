@@ -2758,12 +2758,13 @@ const TELEGRAM_TEACHER_HINT = {
   "Botany": "Vipin Sharma Sir",
 };
 
-function TelegramSyncPage({ taskStates, onLinkTelegram, telegramChannels, onSaveChannel }) {
+function TelegramSyncPage({ taskStates, onLinkTelegram, telegramChannels, onSaveChannel, fetchCache, onSaveFetchCache }) {
   const [subj, setSubj] = useState("Physics");
   const [channelInput, setChannelInput] = useState(telegramChannels[subj] || "");
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(fetchCache[subj] || []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lastFetchStats, setLastFetchStats] = useState(null); // { newCount, dupeCount }
   const [search, setSearch] = useState("");
   const [manualTaskId, setManualTaskId] = useState({});
 
@@ -2773,8 +2774,9 @@ function TelegramSyncPage({ taskStates, onLinkTelegram, telegramChannels, onSave
   const switchSubject = (s) => {
     setSubj(s);
     setChannelInput(telegramChannels[s] || "");
-    setMessages([]);
+    setMessages(fetchCache[s] || []); // restore previously fetched+stored list, not lost on nav
     setError("");
+    setLastFetchStats(null);
   };
 
   const fetchMessages = async (before) => {
@@ -2784,7 +2786,16 @@ function TelegramSyncPage({ taskStates, onLinkTelegram, telegramChannels, onSave
       const res = await fetch(url);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setMessages(prev => before ? [...prev, ...data.messages] : data.messages);
+
+      setMessages(prev => {
+        const existingIds = new Set(prev.map(m => m.id));
+        const fresh = data.messages.filter(m => !existingIds.has(m.id)); // deduplicate against what's already loaded
+        const dupeCount = data.messages.length - fresh.length;
+        setLastFetchStats({ newCount: fresh.length, dupeCount, totalFetched: data.messages.length });
+        const finalList = before ? [...prev, ...fresh] : [...fresh, ...prev];
+        onSaveFetchCache(subj, finalList); // persist so a reload doesn't lose the browsed list
+        return finalList;
+      });
       onSaveChannel(subj, channelInput);
     } catch (e) {
       setError(e.message || "Fetch failed");
@@ -2829,7 +2840,25 @@ function TelegramSyncPage({ taskStates, onLinkTelegram, telegramChannels, onSave
         }}>{loading ? "Fetching…" : "Fetch"}</button>
       </div>
 
-      {error && <div style={{ color: URGENT_RED, fontSize: 12, marginBottom: 12 }}>{error}</div>}
+      {error && (
+        <div style={{ background: `${URGENT_RED}12`, border: `1px solid ${URGENT_RED}55`, borderRadius: 10, padding: 10, marginBottom: 12 }}>
+          <div style={{ color: URGENT_RED, fontSize: 12, marginBottom: 6 }}>{error}</div>
+          <button onClick={() => fetchMessages(null)} style={{ background: URGENT_RED, color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Retry</button>
+        </div>
+      )}
+
+      {lastFetchStats && !error && (
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
+          Last fetch: <span style={{ color: "#22C55E" }}>{lastFetchStats.newCount} new</span>{lastFetchStats.dupeCount > 0 && <span> · <span style={{ color: REVISION_GOLD }}>{lastFetchStats.dupeCount} duplicate(s) skipped</span></span>}
+        </div>
+      )}
+
+      {!loading && !error && messages.length === 0 && lastFetchStats === null && (
+        <EmptyNote text="No posts fetched yet — enter a channel username and tap Fetch." />
+      )}
+      {!loading && !error && messages.length === 0 && lastFetchStats !== null && (
+        <EmptyNote text="Channel returned no posts (or all duplicates of what's already loaded)." />
+      )}
 
       {messages.length > 0 && (
         <>
@@ -3226,6 +3255,7 @@ export default function App() {
   const [plannerLock, setPlannerLock] = useState("Unlocked");
   const [plannerVersions, setPlannerVersions] = useState([]);
   const [dueDateOverrides, setDueDateOverrides] = useState({});
+  const [telegramFetchCache, setTelegramFetchCache] = useState({});
   const [scheduleVersion, setScheduleVersion] = useState(0); // bump to force re-render after recomputeBacklogSchedule
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -3254,7 +3284,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides, telFetchCache] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -3272,6 +3302,7 @@ export default function App() {
         loadBlob("assignments", []),
         loadBlob("plannerVersions", []),
         loadBlob("dueDateOverrides", {}),
+        loadBlob("telegramFetchCache", {}),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -3351,6 +3382,7 @@ export default function App() {
       setAssignments(assigns);
       setPlannerVersions(versions);
       setDueDateOverrides(overrides);
+      setTelegramFetchCache(telFetchCache);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -3678,6 +3710,14 @@ export default function App() {
     });
   }, [updateSettings]);
 
+  const onSaveTelegramFetchCache = useCallback((subj, messages) => {
+    setTelegramFetchCache(prev => {
+      const next = { ...prev, [subj]: messages };
+      saveBlob("telegramFetchCache", next);
+      return next;
+    });
+  }, []);
+
   const onImportPlanner = useCallback((newTasks) => {
     setImportedPlanner(prev => {
       const next = [...prev, ...newTasks];
@@ -3768,7 +3808,7 @@ export default function App() {
         {tab === "more" && moreTab === "integrity" && (<><SubPageHeader title="Data Integrity Check" onBack={() => setMoreTab(null)} /><IntegrityCheckPage taskStates={taskStates} missedRecords={missedRecords} /></>)}
         {tab === "more" && moreTab === "import" && (<><SubPageHeader title="Import Planner" onBack={() => setMoreTab(null)} /><PlannerImportPage importedPlanner={importedPlanner} onImport={onImportPlanner} /></>)}
         {tab === "more" && moreTab === "settings" && (<><SubPageHeader title="Settings" onBack={() => setMoreTab(null)} /><SettingsPage themeMode={themeMode} onChangeTheme={onChangeTheme} dailyTargetHours={dailyTargetHours} onChangeTarget={onChangeTarget} examDate={examDate} onChangeExamDate={onChangeExamDate} onExportData={onExportData} userEmail={userEmail} onLogout={onLogout} backlogSettings={backlogSettings} onApplyBacklogSettings={onApplyBacklogSettings} plannerLock={plannerLock} onChangePlannerLock={onChangePlannerLock} plannerVersions={plannerVersions} /></>)}
-        {tab === "more" && moreTab === "telegram" && (<><SubPageHeader title="Telegram Sync" onBack={() => setMoreTab(null)} /><TelegramSyncPage taskStates={taskStates} onLinkTelegram={onLinkTelegram} telegramChannels={telegramChannels} onSaveChannel={onSaveTelegramChannel} /></>)}
+        {tab === "more" && moreTab === "telegram" && (<><SubPageHeader title="Telegram Sync" onBack={() => setMoreTab(null)} /><TelegramSyncPage taskStates={taskStates} onLinkTelegram={onLinkTelegram} telegramChannels={telegramChannels} onSaveChannel={onSaveTelegramChannel} fetchCache={telegramFetchCache} onSaveFetchCache={onSaveTelegramFetchCache} /></>)}
       </div>
 
       <TaskDetailModal task={selectedTask} taskStates={taskStates} missedRecords={missedRecords} onClose={() => setSelectedTask(null)}
