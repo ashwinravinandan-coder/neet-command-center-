@@ -3063,6 +3063,312 @@ function AssignmentsPage({ assignments, today, onAdd, onComplete, onSkip, onAddP
   );
 }
 
+/* ============================================================
+   PHASE 10 — POMODORO + FOCUS MODE + BREAK & RELAX
+   ============================================================ */
+const POMODORO_PRESETS = [
+  { label: "25 / 5", focus: 25, brk: 5 },
+  { label: "50 / 10", focus: 50, brk: 10 },
+  { label: "Custom", focus: null, brk: null },
+];
+
+function useCountdownTimer(totalSeconds, running, onComplete) {
+  const [remaining, setRemaining] = useState(totalSeconds);
+  useEffect(() => { setRemaining(totalSeconds); }, [totalSeconds]);
+  useEffect(() => {
+    if (!running) return;
+    if (remaining <= 0) { onComplete(); return; }
+    const id = setInterval(() => setRemaining(r => r - 1), 1000);
+    return () => clearInterval(id);
+  }, [running, remaining]); // eslint-disable-line
+  return remaining;
+}
+
+function FocusModeView({ subject, chapter, taskLabel, phase, remaining, totalSeconds, onStop }) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const mins = Math.floor(remaining / 60), secs = remaining % 60;
+  const pct = 100 - (remaining / totalSeconds) * 100;
+  const style = SUBJECT_STYLE[subject] || { accent: "#3B82F6" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 10px", textAlign: "center" }}>
+      <div style={{ fontSize: 11, letterSpacing: 2, color: phase === "focus" ? style.accent : REVISION_GOLD, fontWeight: 700, marginBottom: 6 }}>
+        {phase === "focus" ? "🎯 FOCUS SESSION" : "☕ BREAK"}
+      </div>
+      {taskLabel && <div style={{ fontSize: 14, color: "var(--text)", fontWeight: 600, marginBottom: 2 }}>{taskLabel}</div>}
+      {chapter && <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 20 }}>{chapter}</div>}
+      <ProgressRing pct={pct} size={140} stroke={10} color={phase === "focus" ? style.accent : REVISION_GOLD} />
+      <div style={{ fontSize: 34, fontWeight: 800, color: "var(--text)", marginTop: 16, fontVariantNumeric: "tabular-nums" }}>{pad(mins)}:{pad(secs)}</div>
+      <button onClick={onStop} style={{ marginTop: 26, background: "none", border: "1px solid var(--border)", color: "var(--text-dim)", borderRadius: 10, padding: "10px 24px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+        End Session
+      </button>
+    </div>
+  );
+}
+
+function PomodoroSetup({ onStart, pomodoroSessions }) {
+  const [preset, setPreset] = useState(POMODORO_PRESETS[0]);
+  const [customFocus, setCustomFocus] = useState(25);
+  const [customBreak, setCustomBreak] = useState(5);
+  const [subject, setSubject] = useState("Physics");
+  const [chapter, setChapter] = useState("");
+  const [taskLabel, setTaskLabel] = useState("");
+
+  const today = todayISO();
+  const weekAgo = addDays(today, -6);
+  const todaySessions = pomodoroSessions.filter(s => s.date === today && s.completed);
+  const weekSessions = pomodoroSessions.filter(s => s.date >= weekAgo && s.completed);
+  const todayMinutes = todaySessions.reduce((sum, s) => sum + s.focusMinutes, 0);
+  const weekMinutes = weekSessions.reduce((sum, s) => sum + s.focusMinutes, 0);
+
+  const focusMin = preset.focus ?? customFocus;
+  const breakMin = preset.brk ?? customBreak;
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+        <div style={{ background: NAVY_CARD, borderRadius: 12, padding: 12, textAlign: "center" }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#3B82F6" }}>{todaySessions.length}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>sessions today · {todayMinutes}min</div>
+        </div>
+        <div style={{ background: NAVY_CARD, borderRadius: 12, padding: 12, textAlign: "center" }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: REVISION_GOLD }}>{weekSessions.length}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>sessions this week · {weekMinutes}min</div>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>TIMER PRESET</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {POMODORO_PRESETS.map(p => (
+          <button key={p.label} onClick={() => setPreset(p)} style={{
+            flex: 1, padding: "10px 0", borderRadius: 10, border: preset.label === p.label ? "2px solid #3B82F6" : "1px solid var(--border)",
+            background: "var(--input-bg)", color: "var(--text-dim)", fontSize: 12.5, fontWeight: 700, cursor: "pointer"
+          }}>{p.label}</button>
+        ))}
+      </div>
+      {preset.label === "Custom" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 4 }}>Focus (min)</div>
+            <input type="number" min="1" value={customFocus} onChange={e => setCustomFocus(parseInt(e.target.value) || 1)} style={{ ...inputStyle, width: "100%" }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 4 }}>Break (min)</div>
+            <input type="number" min="1" value={customBreak} onChange={e => setCustomBreak(parseInt(e.target.value) || 1)} style={{ ...inputStyle, width: "100%" }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8 }}>WHAT ARE YOU WORKING ON?</div>
+      <select value={subject} onChange={e => setSubject(e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }}>
+        {SUBJECT_ORDER.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+      <input placeholder="Chapter (optional)" value={chapter} onChange={e => setChapter(e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
+      <input placeholder="Task label (e.g. 'DPP revision')" value={taskLabel} onChange={e => setTaskLabel(e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: 16 }} />
+
+      <button onClick={() => onStart({ focusMin, breakMin, subject, chapter, taskLabel })} style={{
+        width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 10, padding: "13px 0",
+        fontSize: 14, fontWeight: 700, cursor: "pointer"
+      }}>▶ Start Focus Session</button>
+    </div>
+  );
+}
+
+function CompletionPrompt({ onSave }) {
+  const [note, setNote] = useState("");
+  return (
+    <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 16, textAlign: "center" }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>🎉 Session complete!</div>
+      <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>What did you complete?</div>
+      <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Finished 2 DPP pages, revised Kinematics formulas…"
+        style={{ width: "100%", minHeight: 60, background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 10, color: "var(--text)", fontSize: 12.5, marginBottom: 12 }} />
+      <button onClick={() => onSave(note)} style={{ width: "100%", background: "#22C55E", color: "#0B1220", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Save & Finish</button>
+    </div>
+  );
+}
+
+function PomodoroFocusPage({ pomodoroSessions, onSaveSession }) {
+  const [session, setSession] = useState(null); // { focusMin, breakMin, subject, chapter, taskLabel }
+  const [phase, setPhase] = useState("focus"); // focus | break | done
+  const [running, setRunning] = useState(false);
+
+  const totalSeconds = session ? (phase === "focus" ? session.focusMin : session.breakMin) * 60 : 0;
+  const remaining = useCountdownTimer(totalSeconds, running, () => {
+    if (phase === "focus") { setPhase("break-prompt"); setRunning(false); }
+    else if (phase === "break") { setPhase("focus"); }
+  });
+
+  const startSession = (cfg) => { setSession(cfg); setPhase("focus"); setRunning(true); };
+  const stopSession = () => { setSession(null); setPhase("focus"); setRunning(false); };
+  const startBreak = () => { setPhase("break"); setRunning(true); };
+  const finishWithNote = (note) => {
+    onSaveSession({
+      date: todayISO(), subject: session.subject, chapter: session.chapter, taskLabel: session.taskLabel,
+      focusMinutes: session.focusMin, breakMinutes: session.breakMin, completionNote: note, completed: true, timestamp: new Date().toISOString(),
+    });
+    setSession(null); setPhase("focus"); setRunning(false);
+  };
+
+  if (session && (phase === "focus" || phase === "break")) {
+    return <FocusModeView subject={session.subject} chapter={session.chapter} taskLabel={session.taskLabel} phase={phase} remaining={remaining} totalSeconds={totalSeconds} onStop={stopSession} />;
+  }
+  if (session && phase === "break-prompt") {
+    return (
+      <div>
+        <CompletionPrompt onSave={finishWithNote} />
+        <button onClick={startBreak} style={{ width: "100%", marginTop: 10, background: "none", border: "1px solid var(--border)", color: REVISION_GOLD, borderRadius: 10, padding: "10px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+          ☕ Take a {session.breakMin}min break instead
+        </button>
+      </div>
+    );
+  }
+  return <PomodoroSetup onStart={startSession} pomodoroSessions={pomodoroSessions} />;
+}
+
+/* ---------------- Break & Relax (procedurally synthesized, not copied audio) ---------------- */
+const AMBIENT_SOUNDS = [
+  { id: "rain", label: "🌧️ Rain", type: "bandpass", freq: 1000, q: 0.7 },
+  { id: "ocean", label: "🌊 Ocean", type: "lowpass", freq: 400, q: 0.3, lfo: true },
+  { id: "forest", label: "🌲 Forest", type: "highpass", freq: 2000, q: 0.5 },
+  { id: "silence", label: "🤫 Silence", type: null },
+];
+
+function useAmbientNoise() {
+  const ctxRef = React.useRef(null);
+  const nodesRef = React.useRef(null);
+
+  const stop = useCallback(() => {
+    if (nodesRef.current) {
+      try { nodesRef.current.source.stop(); } catch (e) {}
+      nodesRef.current = null;
+    }
+  }, []);
+
+  const play = useCallback((sound, volume) => {
+    stop();
+    if (!sound || sound.type === null) return;
+    if (!ctxRef.current) ctxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = ctxRef.current;
+    const bufferSize = 2 * ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = sound.type;
+    filter.frequency.value = sound.freq;
+    filter.Q.value = sound.q;
+
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    source.start();
+
+    if (sound.lfo) {
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 0.1;
+      lfoGain.gain.value = 200;
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      lfo.start();
+      nodesRef.current = { source, filter, gain, lfo };
+    } else {
+      nodesRef.current = { source, filter, gain };
+    }
+  }, [stop]);
+
+  const setVolume = useCallback((v) => {
+    if (nodesRef.current) nodesRef.current.gain.gain.value = v;
+  }, []);
+
+  useEffect(() => () => stop(), [stop]);
+
+  return { play, stop, setVolume };
+}
+
+function BreakRelaxPage({ favoriteSound, onSetFavorite }) {
+  const [selected, setSelected] = useState(favoriteSound || "rain");
+  const [playing, setPlaying] = useState(false);
+  const [volume, setVolumeState] = useState(0.3);
+  const [breakMinutes, setBreakMinutes] = useState(5);
+  const [breakRunning, setBreakRunning] = useState(false);
+  const { play, stop, setVolume } = useAmbientNoise();
+
+  const sound = AMBIENT_SOUNDS.find(s => s.id === selected);
+  const remaining = useCountdownTimer(breakMinutes * 60, breakRunning, () => { setBreakRunning(false); setPlaying(false); stop(); });
+
+  const togglePlay = () => {
+    if (playing) { stop(); setPlaying(false); }
+    else { play(sound, volume); setPlaying(true); }
+  };
+  const changeSound = (id) => {
+    setSelected(id);
+    if (playing) play(AMBIENT_SOUNDS.find(s => s.id === id), volume);
+  };
+  const changeVolume = (v) => { setVolumeState(v); setVolume(v); };
+  const startBreakTimer = () => { setBreakRunning(true); if (!playing) togglePlay(); };
+  const pad = (n) => String(n).padStart(2, "0");
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 14 }}>
+        Ambient sounds generated in your browser (not copied recordings) — safe, license-free background noise for breaks.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+        {AMBIENT_SOUNDS.map(s => (
+          <button key={s.id} onClick={() => changeSound(s.id)} style={{
+            padding: "14px 0", borderRadius: 12, border: selected === s.id ? "2px solid #3B82F6" : "1px solid var(--border)",
+            background: NAVY_CARD, color: "var(--text)", fontSize: 13, fontWeight: 700, cursor: "pointer", position: "relative"
+          }}>
+            {s.label}
+            {favoriteSound === s.id && <span style={{ position: "absolute", top: 6, right: 8, fontSize: 11 }}>⭐</span>}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <button onClick={togglePlay} style={{
+            width: 48, height: 48, borderRadius: 24, background: playing ? URGENT_RED : "#22C55E", border: "none",
+            color: "#fff", fontSize: 18, cursor: "pointer", flexShrink: 0
+          }}>{playing ? "⏸" : "▶"}</button>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 4 }}>Volume</div>
+            <input type="range" min="0" max="1" step="0.05" value={volume} onChange={e => changeVolume(parseFloat(e.target.value))} style={{ width: "100%" }} />
+          </div>
+        </div>
+        <button onClick={() => onSetFavorite(selected)} style={{
+          background: "none", border: "1px solid var(--border)", color: favoriteSound === selected ? REVISION_GOLD : "var(--text-dim)",
+          borderRadius: 8, padding: "6px 12px", fontSize: 11, cursor: "pointer"
+        }}>{favoriteSound === selected ? "⭐ Favorited" : "☆ Set as favorite"}</button>
+      </div>
+
+      <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 14 }}>
+        <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 8 }}>Break Timer (auto-stops sound when done)</div>
+        {!breakRunning ? (
+          <>
+            <input type="number" min="1" value={breakMinutes} onChange={e => setBreakMinutes(parseInt(e.target.value) || 1)}
+              style={{ ...inputStyle, width: "100%", marginBottom: 10 }} />
+            <button onClick={startBreakTimer} style={{ width: "100%", background: REVISION_GOLD, color: "#0B1220", border: "none", borderRadius: 8, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Start Break</button>
+          </>
+        ) : (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: REVISION_GOLD, fontVariantNumeric: "tabular-nums" }}>{pad(Math.floor(remaining / 60))}:{pad(remaining % 60)}</div>
+            <button onClick={() => { setBreakRunning(false); stop(); setPlaying(false); }} style={{ marginTop: 8, background: "none", border: "1px solid var(--border)", color: "var(--text-dim)", borderRadius: 8, padding: "7px 16px", fontSize: 11.5, cursor: "pointer" }}>Stop</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DashboardPage({ taskStates, studyHours, missedRecords, today, examDate, ncertStates, revisionStates, pyqStates }) {
   const isDone = (t) => computeIsDone(taskStates[t.id]);
   const combinedBySubject = {};
@@ -3186,6 +3492,8 @@ const MORE_ITEMS = [
   { key: "biologyRef", label: "Biology Planner", icon: Dna, color: "#22C55E" },
   { key: "search", label: "Search & Filter", icon: Search, color: "#3B82F6" },
   { key: "assignments", label: "Assignments", icon: FileText, color: "#3B82F6" },
+  { key: "pomodoro", label: "Pomodoro & Focus", icon: Clock, color: "#3B82F6" },
+  { key: "breakrelax", label: "Break & Relax", icon: RefreshCw, color: "#22C55E" },
   { key: "dpp", label: "DPP Tracker", icon: FileText, color: "#F97316" },
   { key: "ncert", label: "NCERT 8x", icon: BookOpen, color: "#22C55E" },
   { key: "revision", label: "Revision 5x", icon: RefreshCw, color: REVISION_GOLD },
@@ -3256,6 +3564,8 @@ export default function App() {
   const [plannerVersions, setPlannerVersions] = useState([]);
   const [dueDateOverrides, setDueDateOverrides] = useState({});
   const [telegramFetchCache, setTelegramFetchCache] = useState({});
+  const [pomodoroSessions, setPomodoroSessions] = useState([]);
+  const [favoriteAmbientSound, setFavoriteAmbientSound] = useState("rain");
   const [scheduleVersion, setScheduleVersion] = useState(0); // bump to force re-render after recomputeBacklogSchedule
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -3284,7 +3594,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides, telFetchCache] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides, telFetchCache, pomoSessions, favSound] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -3303,6 +3613,8 @@ export default function App() {
         loadBlob("plannerVersions", []),
         loadBlob("dueDateOverrides", {}),
         loadBlob("telegramFetchCache", {}),
+        loadBlob("pomodoroSessions", []),
+        loadBlob("favoriteAmbientSound", "rain"),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -3383,6 +3695,8 @@ export default function App() {
       setPlannerVersions(versions);
       setDueDateOverrides(overrides);
       setTelegramFetchCache(telFetchCache);
+      setPomodoroSessions(pomoSessions);
+      setFavoriteAmbientSound(favSound);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -3718,6 +4032,20 @@ export default function App() {
     });
   }, []);
 
+  const onSavePomodoroSession = useCallback((sessionRecord) => {
+    setPomodoroSessions(prev => {
+      const next = [...prev, { ...sessionRecord, id: `POMO-${Date.now()}` }];
+      saveBlob("pomodoroSessions", next);
+      pushHistory(`🍅 Pomodoro session logged — ${sessionRecord.subject} · ${sessionRecord.focusMinutes}min`);
+      return next;
+    });
+  }, [pushHistory]);
+
+  const onSetFavoriteAmbientSound = useCallback((soundId) => {
+    setFavoriteAmbientSound(soundId);
+    saveBlob("favoriteAmbientSound", soundId);
+  }, []);
+
   const onImportPlanner = useCallback((newTasks) => {
     setImportedPlanner(prev => {
       const next = [...prev, ...newTasks];
@@ -3795,6 +4123,8 @@ export default function App() {
         {tab === "more" && moreTab === "biologyRef" && (<><SubPageHeader title="Biology Planner (Original)" onBack={() => setMoreTab(null)} /><PlannerReferencePage group="Biology" /></>)}
         {tab === "more" && moreTab === "search" && (<><SubPageHeader title="Search & Filter" onBack={() => setMoreTab(null)} /><SearchPage taskStates={taskStates} missedRecords={missedRecords} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} today={today} /></>)}
         {tab === "more" && moreTab === "assignments" && (<><SubPageHeader title="Assignments" onBack={() => setMoreTab(null)} /><AssignmentsPage assignments={assignments} today={today} onAdd={onAddAssignment} onComplete={onCompleteAssignment} onSkip={onSkipAssignment} onAddProof={onAddAssignmentProof} onRemoveProof={onRemoveAssignmentProof} onToggleRequireProof={onToggleAssignmentRequireProof} /></>)}
+        {tab === "more" && moreTab === "pomodoro" && (<><SubPageHeader title="Pomodoro & Focus" onBack={() => setMoreTab(null)} /><PomodoroFocusPage pomodoroSessions={pomodoroSessions} onSaveSession={onSavePomodoroSession} /></>)}
+        {tab === "more" && moreTab === "breakrelax" && (<><SubPageHeader title="Break & Relax" onBack={() => setMoreTab(null)} /><BreakRelaxPage favoriteSound={favoriteAmbientSound} onSetFavorite={onSetFavoriteAmbientSound} /></>)}
         {tab === "more" && moreTab === "dpp" && (<><SubPageHeader title="DPP Tracker" onBack={() => setMoreTab(null)} /><DppPage taskStates={taskStates} onToggle={onToggle} /></>)}
         {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
         {tab === "more" && moreTab === "revision" && (<><SubPageHeader title="Revision 5x Tracker" onBack={() => setMoreTab(null)} /><RevisionPage revisionStates={revisionStates} onToggle={onRevisionToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
