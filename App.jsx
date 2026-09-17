@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import {
+
   Home, Calendar, Flame, RefreshCw, History as HistoryIcon, BarChart3,
   CheckCircle2, Circle, Clock, AlertTriangle, ChevronRight, ChevronDown,
   BookOpen, Target, TrendingUp, X, Plus, MoreHorizontal, ArrowLeft, FileText,
