@@ -1,4 +1,5 @@
-
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
   Home, Calendar, Flame, RefreshCw, History as HistoryIcon, BarChart3,
   CheckCircle2, Circle, Clock, AlertTriangle, ChevronRight, ChevronDown,
   BookOpen, Target, TrendingUp, X, Plus, MoreHorizontal, ArrowLeft, FileText,
@@ -3368,6 +3369,209 @@ function BreakRelaxPage({ favoriteSound, onSetFavorite }) {
   );
 }
 
+/* ============================================================
+   PHASE 12 — AI SEARCH + AI NEET COACH
+   Both call our own serverless functions (/api/ai-search,
+   /api/ai-coach) so the API key never reaches the browser.
+   The Coach is only ever given the student's REAL stats.
+   ============================================================ */
+function AiSearchPage({ recentQueries, onSaveQuery }) {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  const runSearch = async (q) => {
+    const searchQuery = q || query;
+    if (!searchQuery.trim()) return;
+    setLoading(true); setError(""); setResult(null);
+    try {
+      const res = await fetch("/api/ai-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: searchQuery }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setResult(data.result);
+      onSaveQuery(searchQuery);
+    } catch (e) {
+      setError(e.message || "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const FIELD_LABELS = [
+    ["explanation", "📖 Explanation", "var(--text)"],
+    ["formula", "🧮 Formula", "#3B82F6"],
+    ["variables", "🔤 Variables", "var(--text-dim)"],
+    ["units", "📏 Units", "var(--text-dim)"],
+    ["neetRelevance", "🎯 NEET Relevance", "#22C55E"],
+    ["example", "💡 Example", "var(--text-dim)"],
+    ["commonMistake", "⚠️ Common Mistake", URGENT_RED],
+    ["relatedTopic", "🔗 Related Topic", REVISION_GOLD],
+  ];
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 12 }}>
+        Ask about any formula, concept, term or NEET topic. Answers are structured for exam prep.
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input value={query} onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && runSearch()}
+          placeholder="e.g. Nernst equation, what is aestivation, Bohr radius…"
+          style={{ flex: 1, background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 10, padding: "11px 12px", color: "var(--text)", fontSize: 13 }} />
+        <button onClick={() => runSearch()} disabled={loading || !query.trim()} style={{
+          background: "#3B82F6", color: "#fff", border: "none", borderRadius: 10, padding: "11px 18px",
+          fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: (loading || !query.trim()) ? 0.5 : 1
+        }}>{loading ? "…" : "Ask"}</button>
+      </div>
+
+      {recentQueries.length > 0 && !result && !loading && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginBottom: 6 }}>Recent</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {recentQueries.slice(-8).reverse().map((q, i) => (
+              <button key={i} onClick={() => { setQuery(q); runSearch(q); }} style={{
+                background: NAVY_CARD, border: "1px solid var(--border)", color: "var(--text-dim)", borderRadius: 6,
+                padding: "5px 10px", fontSize: 10.5, cursor: "pointer"
+              }}>{q.length > 30 ? q.slice(0, 30) + "…" : q}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loading && <EmptyNote text="Thinking…" />}
+
+      {error && (
+        <div style={{ background: `${URGENT_RED}12`, border: `1px solid ${URGENT_RED}55`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
+          <div style={{ color: URGENT_RED, fontSize: 12, marginBottom: 6 }}>{error}</div>
+          <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+            If this says the server isn't configured, the ANTHROPIC_API_KEY environment variable still needs to be added in Vercel.
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <div>
+          {FIELD_LABELS.map(([key, label, color]) => result[key] ? (
+            <div key={key} style={{ background: NAVY_CARD, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color, marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{result[key]}</div>
+            </div>
+          ) : null)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AiCoachPage({ taskStates, studyHours, ncertStates, revisionStates, pyqStates, mistakes, tests, today }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [advice, setAdvice] = useState("");
+
+  const buildStats = () => {
+    const isDone = (t) => computeIsDone(taskStates[t.id]);
+    const combinedBySubject = {};
+    SUBJECT_ORDER.forEach(s => { combinedBySubject[s] = effectiveBacklogForSubject(s, today, isDone); });
+    const backlogBySubject = {};
+    SUBJECT_ORDER.forEach(s => {
+      const arr = combinedBySubject[s];
+      if (arr.length) backlogBySubject[s] = { total: arr.length, completed: arr.filter(isDone).length, pending: arr.filter(t => !isDone(t)).length };
+    });
+
+    const last7 = [];
+    for (let i = 6; i >= 0; i--) {
+      const iso = addDays(today, -i);
+      const h = studyHours[iso] || {};
+      last7.push({ date: iso, hours: Object.values(h).reduce((a, b) => a + (b || 0), 0) });
+    }
+    const subjectHourTotals = {};
+    SUBJECT_ORDER.forEach(s => {
+      const total = Object.values(studyHours).reduce((sum, h) => sum + (h[s] || 0), 0);
+      if (total > 0) subjectHourTotals[s] = total;
+    });
+
+    const ncertDone = Object.values(ncertStates).filter(s => s?.done).length;
+    const revisionDone = Object.values(revisionStates).filter(s => s?.done).length;
+    const pyqDone = Object.values(pyqStates).filter(s => s?.status === "Completed").length;
+    const openMistakes = mistakes.filter(m => m.status !== "Resolved");
+    const mistakesByType = {};
+    openMistakes.forEach(m => { mistakesByType[m.errorType] = (mistakesByType[m.errorType] || 0) + 1; });
+
+    return {
+      today,
+      backlogBySubject,
+      last7DaysStudyHours: last7,
+      allTimeHoursBySubject: subjectHourTotals,
+      ncertRoundsCompleted: ncertDone,
+      revisionRoundsCompleted: revisionDone,
+      pyqYearSubjectsCompleted: pyqDone,
+      openMistakeCount: openMistakes.length,
+      openMistakesByErrorType: mistakesByType,
+      testsLogged: tests.length,
+      testScores: tests.map(t => ({ name: t.testName, date: t.date, percent: t.totalMarks ? +((t.score / t.totalMarks) * 100).toFixed(1) : null })),
+    };
+  };
+
+  const runCoach = async () => {
+    setLoading(true); setError(""); setAdvice("");
+    try {
+      const res = await fetch("/api/ai-coach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stats: buildStats() }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setAdvice(data.result);
+    } catch (e) {
+      setError(e.message || "Coach request failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 6 }}>
+        Analyses your actual logged data — backlog, study hours, NCERT/revision/PYQ progress, mistakes, test scores.
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 14 }}>
+        It only ever sees numbers you've genuinely logged, and is instructed never to invent statistics or predict your rank.
+      </div>
+
+      <button onClick={runCoach} disabled={loading} style={{
+        width: "100%", background: "#14B8A6", color: "#0B1220", border: "none", borderRadius: 10, padding: "13px 0",
+        fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.6 : 1, marginBottom: 14
+      }}>{loading ? "Analysing your data…" : "🧠 Analyse My Progress"}</button>
+
+      {error && (
+        <div style={{ background: `${URGENT_RED}12`, border: `1px solid ${URGENT_RED}55`, borderRadius: 10, padding: 12 }}>
+          <div style={{ color: URGENT_RED, fontSize: 12, marginBottom: 6 }}>{error}</div>
+          <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>
+            If this says the server isn't configured, the ANTHROPIC_API_KEY environment variable still needs to be added in Vercel.
+          </div>
+        </div>
+      )}
+
+      {advice && (
+        <div style={{ background: NAVY_CARD, borderRadius: 14, padding: 14 }}>
+          {advice.split("\n").filter(Boolean).map((line, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
+              <span style={{ color: "#14B8A6", flexShrink: 0 }}>▸</span>
+              <span style={{ fontSize: 12.5, color: "var(--text-dim)", lineHeight: 1.5 }}>{line.replace(/^[-•*]\s*/, "")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardPage({ taskStates, studyHours, missedRecords, today, examDate, ncertStates, revisionStates, pyqStates }) {
   const isDone = (t) => computeIsDone(taskStates[t.id]);
   const combinedBySubject = {};
@@ -3492,6 +3696,8 @@ const MORE_ITEMS = [
   { key: "search", label: "Search & Filter", icon: Search, color: "#3B82F6" },
   { key: "assignments", label: "Assignments", icon: FileText, color: "#3B82F6" },
   { key: "pomodoro", label: "Pomodoro & Focus", icon: Clock, color: "#3B82F6" },
+  { key: "aisearch", label: "AI Search", icon: Search, color: "#14B8A6" },
+  { key: "aicoach", label: "AI Coach", icon: TrendingUp, color: "#14B8A6" },
   { key: "breakrelax", label: "Break & Relax", icon: RefreshCw, color: "#22C55E" },
   { key: "dpp", label: "DPP Tracker", icon: FileText, color: "#F97316" },
   { key: "ncert", label: "NCERT 8x", icon: BookOpen, color: "#22C55E" },
@@ -3565,6 +3771,7 @@ export default function App() {
   const [telegramFetchCache, setTelegramFetchCache] = useState({});
   const [pomodoroSessions, setPomodoroSessions] = useState([]);
   const [favoriteAmbientSound, setFavoriteAmbientSound] = useState("rain");
+  const [aiRecentQueries, setAiRecentQueries] = useState([]);
   const [scheduleVersion, setScheduleVersion] = useState(0); // bump to force re-render after recomputeBacklogSchedule
   const [isBufferDay, setIsBufferDay] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -3593,7 +3800,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides, telFetchCache, pomoSessions, favSound] = await Promise.all([
+      const [ts, sh, hi, mr, settings, ncs, revs, pyqs, mist, tsts, impPlan, spaced, backlogTrend, compHist, assigns, versions, overrides, telFetchCache, pomoSessions, favSound, aiQueries] = await Promise.all([
         loadBlob("taskStates", {}),
         loadBlob("studyHours", {}),
         loadBlob("history", []),
@@ -3614,6 +3821,7 @@ export default function App() {
         loadBlob("telegramFetchCache", {}),
         loadBlob("pomodoroSessions", []),
         loadBlob("favoriteAmbientSound", "rain"),
+        loadBlob("aiRecentQueries", []),
       ]);
 
       // Idempotent daily automation: only runs once per day per device.
@@ -3696,6 +3904,7 @@ export default function App() {
       setTelegramFetchCache(telFetchCache);
       setPomodoroSessions(pomoSessions);
       setFavoriteAmbientSound(favSound);
+      setAiRecentQueries(aiQueries);
       setLoaded(true);
     })();
   }, []); // eslint-disable-line
@@ -4040,6 +4249,14 @@ export default function App() {
     });
   }, [pushHistory]);
 
+  const onSaveAiQuery = useCallback((q) => {
+    setAiRecentQueries(prev => {
+      const next = [...prev.filter(x => x !== q), q].slice(-20);
+      saveBlob("aiRecentQueries", next);
+      return next;
+    });
+  }, []);
+
   const onSetFavoriteAmbientSound = useCallback((soundId) => {
     setFavoriteAmbientSound(soundId);
     saveBlob("favoriteAmbientSound", soundId);
@@ -4123,6 +4340,8 @@ export default function App() {
         {tab === "more" && moreTab === "search" && (<><SubPageHeader title="Search & Filter" onBack={() => setMoreTab(null)} /><SearchPage taskStates={taskStates} missedRecords={missedRecords} onToggle={onToggle} onHours={onTaskHours} onOpenDetail={setSelectedTask} today={today} /></>)}
         {tab === "more" && moreTab === "assignments" && (<><SubPageHeader title="Assignments" onBack={() => setMoreTab(null)} /><AssignmentsPage assignments={assignments} today={today} onAdd={onAddAssignment} onComplete={onCompleteAssignment} onSkip={onSkipAssignment} onAddProof={onAddAssignmentProof} onRemoveProof={onRemoveAssignmentProof} onToggleRequireProof={onToggleAssignmentRequireProof} /></>)}
         {tab === "more" && moreTab === "pomodoro" && (<><SubPageHeader title="Pomodoro & Focus" onBack={() => setMoreTab(null)} /><PomodoroFocusPage pomodoroSessions={pomodoroSessions} onSaveSession={onSavePomodoroSession} /></>)}
+        {tab === "more" && moreTab === "aisearch" && (<><SubPageHeader title="AI Search" onBack={() => setMoreTab(null)} /><AiSearchPage recentQueries={aiRecentQueries} onSaveQuery={onSaveAiQuery} /></>)}
+        {tab === "more" && moreTab === "aicoach" && (<><SubPageHeader title="AI NEET Coach" onBack={() => setMoreTab(null)} /><AiCoachPage taskStates={taskStates} studyHours={studyHours} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} mistakes={mistakes} tests={tests} today={today} /></>)}
         {tab === "more" && moreTab === "breakrelax" && (<><SubPageHeader title="Break & Relax" onBack={() => setMoreTab(null)} /><BreakRelaxPage favoriteSound={favoriteAmbientSound} onSetFavorite={onSetFavoriteAmbientSound} /></>)}
         {tab === "more" && moreTab === "dpp" && (<><SubPageHeader title="DPP Tracker" onBack={() => setMoreTab(null)} /><DppPage taskStates={taskStates} onToggle={onToggle} /></>)}
         {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
