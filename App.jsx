@@ -3572,6 +3572,288 @@ function AiCoachPage({ taskStates, studyHours, ncertStates, revisionStates, pyqS
   );
 }
 
+/* ============================================================
+   PHASE 13 — STUDY TECHNIQUES, STRATEGIES, DAILY MOTIVATION
+   All content below is originally written for this app. No
+   quotes are attributed to real people, and no topper names,
+   marks or claims are invented — strategies are described as
+   general evidence-based practice, with research-backed ones
+   distinguished from commonly-recommended-but-anecdotal ones.
+   ============================================================ */
+const STUDY_TECHNIQUES = [
+  {
+    name: "Active Recall", evidence: "Research-backed",
+    what: "Retrieving information from memory instead of re-reading it.",
+    why: "Forcing recall strengthens memory far more than passive review — one of the most consistently supported findings in learning research.",
+    how: "Close the book, write down everything you remember about the topic, then check what you missed.",
+    when: "After every lecture, and before every revision round.",
+    example: "After a Human Physiology lecture, list the steps of urine formation from memory before opening NCERT.",
+    mistake: "Highlighting and re-reading instead — it feels productive but builds far weaker retention.",
+  },
+  {
+    name: "Spaced Repetition", evidence: "Research-backed",
+    what: "Revisiting material at increasing intervals rather than all at once.",
+    why: "Revisiting just as you're starting to forget produces much stronger long-term retention than massed study.",
+    how: "Revise a chapter after ~1 day, then ~7 days, then ~30 days.",
+    when: "Continuously, across the whole prep cycle.",
+    example: "This app's Spaced Repetition section on Today surfaces lectures at 3/7/30-day intervals automatically.",
+    mistake: "Cramming a whole subject in one weekend and never returning to it.",
+  },
+  {
+    name: "Feynman Technique", evidence: "Widely recommended",
+    what: "Explaining a concept in simple language as if teaching a beginner.",
+    why: "Gaps in your understanding become obvious the moment you can't explain something simply.",
+    how: "Write the concept in plain words, notice where you get stuck, go back to the source, simplify again.",
+    when: "For concepts you 'sort of' understand but can't apply.",
+    example: "Explain why a transition metal shows variable oxidation states without using jargon.",
+    mistake: "Explaining using textbook phrasing you've memorised — that hides the gap instead of exposing it.",
+  },
+  {
+    name: "Blurting", evidence: "Widely recommended",
+    what: "Dumping everything you know about a topic onto blank paper, unstructured.",
+    why: "A fast, low-effort form of active recall that shows you exactly what's missing.",
+    how: "Set 5 minutes, write everything you can recall, then fill gaps in a different colour.",
+    when: "Quick chapter check before a test.",
+    example: "Blurt everything about the Calvin cycle, then compare against NCERT.",
+    mistake: "Stopping at what you remember — the gap-filling step is where the learning happens.",
+  },
+  {
+    name: "Interleaving", evidence: "Research-backed",
+    what: "Mixing different topics or question types in one session instead of blocking one topic.",
+    why: "Mixed practice improves your ability to identify which concept a question is testing — closer to real exam conditions.",
+    how: "Mix Physics numericals from 2-3 chapters in one practice set.",
+    when: "During problem practice, once basics are solid.",
+    example: "One set with Kinematics + Laws of Motion + Work-Energy questions shuffled.",
+    mistake: "Doing 40 questions from one chapter — you stop reading questions carefully because you already know the method.",
+  },
+  {
+    name: "Retrieval Practice (Testing Effect)", evidence: "Research-backed",
+    what: "Using tests as a learning tool, not just a measurement tool.",
+    why: "Being tested on material produces better retention than spending the same time reviewing it.",
+    how: "Do questions before you feel 'ready' — struggling productively is part of the benefit.",
+    when: "Right after learning, and repeatedly afterward.",
+    example: "Attempt a DPP immediately after the lecture, even if you expect to get some wrong.",
+    mistake: "Waiting until you 'finish revising' before attempting any questions.",
+  },
+  {
+    name: "Pomodoro", evidence: "Widely recommended",
+    what: "Focused work blocks separated by short breaks.",
+    why: "Reduces the activation energy to start, and structured breaks help sustain attention across long study days.",
+    how: "25 or 50 minutes focused, then 5 or 10 minutes away from the desk.",
+    when: "Long study days, or when starting feels hard.",
+    example: "Use this app's Pomodoro page — it logs each session against a subject.",
+    mistake: "Checking your phone during the break — it defeats the recovery purpose.",
+  },
+  {
+    name: "Error-Based Learning", evidence: "Research-backed",
+    what: "Systematically studying your own mistakes rather than just noting them.",
+    why: "Your wrong answers point precisely at your weak spots — far more efficiently than random revision.",
+    how: "Log every mistake with the correct concept, then re-test yourself on it later.",
+    when: "After every DPP and every test.",
+    example: "Use the Mistake Book here, and use 'Revise in 3 days' to schedule a re-test.",
+    mistake: "Logging mistakes but never revisiting them — the log becomes a diary instead of a tool.",
+  },
+  {
+    name: "PYQ Analysis", evidence: "Widely recommended",
+    what: "Studying past-year questions for patterns, not just for practice.",
+    why: "Reveals which topics are asked repeatedly and how questions are framed.",
+    how: "After solving, tag each question by chapter and difficulty; notice which chapters keep recurring.",
+    when: "Once a chapter's basics are done.",
+    example: "Use the PYQ tracker's tier tagging (Easy / Moderate / High-Yield Repeater).",
+    mistake: "Treating PYQs as just another question bank instead of analysing the pattern.",
+  },
+  {
+    name: "NCERT Line-by-Line (Biology)", evidence: "Widely recommended",
+    what: "Reading Biology NCERT sentence by sentence, treating every line as testable.",
+    why: "A large share of NEET Biology questions map directly onto NCERT statements, including details in figures and small print.",
+    how: "Read slowly, mark lines you didn't know, and revisit them in the next round.",
+    when: "Repeatedly — this app tracks 8 independent rounds.",
+    example: "Use the NCERT 8x tracker's By Chapter view to see which chapters are lagging.",
+    mistake: "Skimming familiar chapters — the details you skip are often exactly what's asked.",
+  },
+];
+
+const TOPPER_STRATEGY_CATEGORIES = [
+  { cat: "Time Management", evidence: "Widely recommended", points: [
+    "Fix a daily minimum you can hit even on bad days — consistency beats occasional 14-hour days.",
+    "Protect one slot per day for revision, not just new content.",
+    "Track actual hours, not intended hours — the gap is usually where the problem is.",
+  ]},
+  { cat: "Revision", evidence: "Research-backed", points: [
+    "Plan revision rounds from the start rather than leaving them for the last two months.",
+    "Revise before you forget, not after — spacing is what makes revision efficient.",
+    "Each round should be faster than the last; if it isn't, the earlier round wasn't active enough.",
+  ]},
+  { cat: "NCERT", evidence: "Widely recommended", points: [
+    "For Biology, treat NCERT as the primary source and coaching material as support.",
+    "Don't skip diagrams, tables, examples or summary boxes.",
+    "Multiple lighter passes generally beat one heavy pass.",
+  ]},
+  { cat: "PYQ", evidence: "Widely recommended", points: [
+    "Solve PYQs chapter-wise while learning, then year-wise closer to the exam.",
+    "Analyse why each wrong option is wrong, not just why the right one is right.",
+    "Repeated question patterns are a signal about what to prioritise.",
+  ]},
+  { cat: "Tests", evidence: "Research-backed", points: [
+    "Take tests under real time pressure — untimed practice hides your actual pacing problem.",
+    "Spend more time analysing a test than taking it.",
+    "A dropping score after adding new chapters is normal; look at the trend, not one test.",
+  ]},
+  { cat: "Mistake Book", evidence: "Research-backed", points: [
+    "Categorise mistakes by type (conceptual / calculation / silly) — the fix differs for each.",
+    "Silly mistakes repeating is a process problem, not a knowledge problem.",
+    "Re-test yourself on logged mistakes; don't just re-read them.",
+  ]},
+  { cat: "Backlog", evidence: "Widely recommended", points: [
+    "Clear backlog in a fixed daily quota rather than waiting for a free weekend.",
+    "Never let new live classes become backlog while clearing old backlog.",
+    "If backlog grows three days running, reduce new intake before it compounds.",
+  ]},
+  { cat: "Physics", evidence: "Widely recommended", points: [
+    "Prioritise concept clarity over formula memorisation — NEET Physics rewards application.",
+    "Practise numericals daily; Physics degrades faster than Biology without practice.",
+    "Maintain a formula sheet you actually revise, not one you only write.",
+  ]},
+  { cat: "Chemistry", evidence: "Widely recommended", points: [
+    "Inorganic rewards repeated NCERT reading; Physical rewards numerical practice; Organic rewards mechanism understanding.",
+    "Don't memorise Organic reactions as isolated facts — learn the underlying mechanism.",
+    "Physical Chemistry formulas need the same treatment as Physics formulas.",
+  ]},
+  { cat: "Biology", evidence: "Widely recommended", points: [
+    "Volume of retention matters more than volume of new reading.",
+    "Diagrams and tables are high-yield — practise reproducing them.",
+    "Human Physiology and Genetics typically carry heavy weight; give them proportionate time.",
+  ]},
+  { cat: "Consistency", evidence: "Research-backed", points: [
+    "Showing up daily at a lower intensity beats sporadic high-intensity bursts.",
+    "Build a restart rule for bad days — a 30-minute minimum keeps the habit alive.",
+    "Sleep is part of preparation, not time stolen from it; memory consolidation depends on it.",
+  ]},
+  { cat: "Exam Strategy", evidence: "Widely recommended", points: [
+    "Decide your section order and time allocation before exam day, not during it.",
+    "Have a rule for when to skip and move on.",
+    "Practise the full paper duration at least a few times before the exam.",
+  ]},
+];
+
+const DAILY_MOTIVATION = [
+  "Consistency compounds. One honest hour today beats a planned twelve tomorrow.",
+  "You don't have to feel ready to start — starting is what produces readiness.",
+  "The chapter you keep avoiding is usually the one holding your score back.",
+  "Progress you can't see on a bad day is still progress. Check your trend, not your mood.",
+  "A mistake logged and understood is worth more than five questions you already knew.",
+  "Revision isn't the boring part of preparation. It's where preparation actually happens.",
+  "Slow reading you remember beats fast reading you forget.",
+  "Your backlog shrinks the same way it grew — a little at a time.",
+  "Bad study days are data, not verdicts. Adjust the plan, don't abandon it.",
+  "The goal isn't to study perfectly. It's to not stop.",
+  "Every round of NCERT finds something the last round missed.",
+  "You're allowed to rest. Rest is what makes the next session usable.",
+  "Comparison steals time you could spend closing your own gaps.",
+  "Difficulty is a sign you're at the edge of what you know — that's exactly where learning happens.",
+];
+
+function TechniqueCard({ t }) {
+  const [open, setOpen] = useState(false);
+  const evidenceColor = t.evidence === "Research-backed" ? "#22C55E" : REVISION_GOLD;
+  return (
+    <div style={{ background: NAVY_CARD, borderRadius: 12, marginBottom: 8, overflow: "hidden" }}>
+      <button onClick={() => setOpen(!open)} style={{ width: "100%", background: "none", border: "none", padding: 12, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+        <div style={{ flex: 1, textAlign: "left" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{t.name}</div>
+          <span style={{ fontSize: 9.5, color: evidenceColor, background: `${evidenceColor}22`, padding: "2px 7px", borderRadius: 6 }}>{t.evidence}</span>
+        </div>
+        {open ? <ChevronDown size={16} color="var(--text-muted)" /> : <ChevronRight size={16} color="var(--text-muted)" />}
+      </button>
+      {open && (
+        <div style={{ padding: "0 12px 12px" }}>
+          {[["What", t.what], ["Why", t.why], ["How", t.how], ["When", t.when], ["NEET example", t.example], ["Common mistake", t.mistake]].map(([label, val]) => (
+            <div key={label} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: label === "Common mistake" ? URGENT_RED : "var(--text-muted)", marginBottom: 2 }}>{label.toUpperCase()}</div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>{val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudyTechniquesPage() {
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 12 }}>
+        Evidence-based study methods, each with a NEET-specific example. Tap to expand.
+      </div>
+      {STUDY_TECHNIQUES.map(t => <TechniqueCard key={t.name} t={t} />)}
+    </div>
+  );
+}
+
+function TopperStrategiesPage() {
+  const [openCat, setOpenCat] = useState(null);
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 6 }}>
+        Preparation strategies by category, each labelled as research-backed or commonly recommended.
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 14 }}>
+        No topper names, marks or quotes are used here — these are general principles, not claims about specific individuals.
+      </div>
+      {TOPPER_STRATEGY_CATEGORIES.map(c => {
+        const isOpen = openCat === c.cat;
+        const evidenceColor = c.evidence === "Research-backed" ? "#22C55E" : REVISION_GOLD;
+        return (
+          <div key={c.cat} style={{ background: NAVY_CARD, borderRadius: 12, marginBottom: 8, overflow: "hidden" }}>
+            <button onClick={() => setOpenCat(isOpen ? null : c.cat)} style={{ width: "100%", background: "none", border: "none", padding: 12, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+              <div style={{ flex: 1, textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{c.cat}</div>
+                <span style={{ fontSize: 9.5, color: evidenceColor, background: `${evidenceColor}22`, padding: "2px 7px", borderRadius: 6 }}>{c.evidence}</span>
+              </div>
+              {isOpen ? <ChevronDown size={16} color="var(--text-muted)" /> : <ChevronRight size={16} color="var(--text-muted)" />}
+            </button>
+            {isOpen && (
+              <div style={{ padding: "0 12px 12px" }}>
+                {c.points.map((p, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border2)" }}>
+                    <span style={{ color: "#3B82F6", flexShrink: 0 }}>▸</span>
+                    <span style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>{p}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DailyMotivationPage({ today }) {
+  // Deterministic per-day pick so it stays the same all day, then changes.
+  const dayIndex = Math.abs(daysBetween("2026-01-01", today)) % DAILY_MOTIVATION.length;
+  const [extraIndex, setExtraIndex] = useState(null);
+  const shown = extraIndex === null ? DAILY_MOTIVATION[dayIndex] : DAILY_MOTIVATION[extraIndex];
+
+  return (
+    <div>
+      <div style={{
+        background: `linear-gradient(135deg, #1E3A5F, var(--input-bg))`, borderRadius: 16, padding: 24, marginBottom: 14, textAlign: "center"
+      }}>
+        <div style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: 1.5, marginBottom: 12 }}>TODAY'S REMINDER</div>
+        <div style={{ fontSize: 16, color: "#fff", lineHeight: 1.6, fontWeight: 500 }}>{shown}</div>
+      </div>
+      <button onClick={() => setExtraIndex(Math.floor(Math.random() * DAILY_MOTIVATION.length))} style={{
+        width: "100%", background: NAVY_CARD, border: "1px solid var(--border)", color: "var(--text-dim)", borderRadius: 10,
+        padding: "11px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer", marginBottom: 14
+      }}>Show another</button>
+      <div style={{ fontSize: 10.5, color: "var(--text-muted)", textAlign: "center" }}>
+        Written originally for this app — not attributed quotes.
+      </div>
+    </div>
+  );
+}
+
 function DashboardPage({ taskStates, studyHours, missedRecords, today, examDate, ncertStates, revisionStates, pyqStates }) {
   const isDone = (t) => computeIsDone(taskStates[t.id]);
   const combinedBySubject = {};
@@ -3698,6 +3980,9 @@ const MORE_ITEMS = [
   { key: "pomodoro", label: "Pomodoro & Focus", icon: Clock, color: "#3B82F6" },
   { key: "aisearch", label: "AI Search", icon: Search, color: "#14B8A6" },
   { key: "aicoach", label: "AI Coach", icon: TrendingUp, color: "#14B8A6" },
+  { key: "techniques", label: "Study Techniques", icon: BookOpen, color: "#3B82F6" },
+  { key: "strategies", label: "Topper Strategies", icon: Target, color: REVISION_GOLD },
+  { key: "motivation", label: "Daily Motivation", icon: Zap, color: "#22C55E" },
   { key: "breakrelax", label: "Break & Relax", icon: RefreshCw, color: "#22C55E" },
   { key: "dpp", label: "DPP Tracker", icon: FileText, color: "#F97316" },
   { key: "ncert", label: "NCERT 8x", icon: BookOpen, color: "#22C55E" },
@@ -4342,6 +4627,9 @@ export default function App() {
         {tab === "more" && moreTab === "pomodoro" && (<><SubPageHeader title="Pomodoro & Focus" onBack={() => setMoreTab(null)} /><PomodoroFocusPage pomodoroSessions={pomodoroSessions} onSaveSession={onSavePomodoroSession} /></>)}
         {tab === "more" && moreTab === "aisearch" && (<><SubPageHeader title="AI Search" onBack={() => setMoreTab(null)} /><AiSearchPage recentQueries={aiRecentQueries} onSaveQuery={onSaveAiQuery} /></>)}
         {tab === "more" && moreTab === "aicoach" && (<><SubPageHeader title="AI NEET Coach" onBack={() => setMoreTab(null)} /><AiCoachPage taskStates={taskStates} studyHours={studyHours} ncertStates={ncertStates} revisionStates={revisionStates} pyqStates={pyqStates} mistakes={mistakes} tests={tests} today={today} /></>)}
+        {tab === "more" && moreTab === "techniques" && (<><SubPageHeader title="Study Techniques" onBack={() => setMoreTab(null)} /><StudyTechniquesPage /></>)}
+        {tab === "more" && moreTab === "strategies" && (<><SubPageHeader title="Topper Strategies" onBack={() => setMoreTab(null)} /><TopperStrategiesPage /></>)}
+        {tab === "more" && moreTab === "motivation" && (<><SubPageHeader title="Daily Motivation" onBack={() => setMoreTab(null)} /><DailyMotivationPage today={today} /></>)}
         {tab === "more" && moreTab === "breakrelax" && (<><SubPageHeader title="Break & Relax" onBack={() => setMoreTab(null)} /><BreakRelaxPage favoriteSound={favoriteAmbientSound} onSetFavorite={onSetFavoriteAmbientSound} /></>)}
         {tab === "more" && moreTab === "dpp" && (<><SubPageHeader title="DPP Tracker" onBack={() => setMoreTab(null)} /><DppPage taskStates={taskStates} onToggle={onToggle} /></>)}
         {tab === "more" && moreTab === "ncert" && (<><SubPageHeader title="NCERT 8x Tracker" onBack={() => setMoreTab(null)} /><NcertPage ncertStates={ncertStates} onToggle={onNcertToggle} today={today} dueDateOverrides={dueDateOverrides} onReschedule={onRescheduleDue} /></>)}
